@@ -39,6 +39,7 @@ export default function App() {
   const [shareQuote, setShareQuote] = useState<Quote | null>(null)
   const [wizardPausedForCatalog, setWizardPausedForCatalog] = useState(false)
   const [showProjectModal, setShowProjectModal] = useState(false)
+  const [projectWizardInstance, setProjectWizardInstance] = useState(0)
   const [contactSearch, setContactSearch] = useState('')
   const [quoteSearch, setQuoteSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('Todos')
@@ -76,8 +77,8 @@ export default function App() {
   function showToast(message: string) { setToast(message) }
 
   const displayName = session?.user.user_metadata?.full_name || session?.user.email?.split('@')[0] || 'Minha oficina'
-  function startProject() { setPage('orcamentos'); setShareQuote(null); setWizardPausedForCatalog(false); setShowProjectModal(true) }
-  function closeProjectModal() { setShowProjectModal(false); setWizardPausedForCatalog(false) }
+  function startProject() { setProjectWizardInstance(value => value + 1); setPage('orcamentos'); setShareQuote(null); setWizardPausedForCatalog(false); setShowProjectModal(true) }
+  function closeProjectModal() { setShowProjectModal(false); setWizardPausedForCatalog(false); setProjectWizardInstance(value => value + 1) }
   const filteredContacts = useMemo(() => contacts.filter(contact => `${contact.name} ${contact.phone} ${contact.email}`.toLowerCase().includes(contactSearch.toLowerCase())), [contacts, contactSearch])
   const filteredQuotes = useMemo(() => quotes.filter(quote => {
     const matchesSearch = `${quote.number} ${quote.title} ${quote.contacts?.name ?? ''}`.toLowerCase().includes(quoteSearch.toLowerCase())
@@ -121,7 +122,7 @@ export default function App() {
     })
     setShowContactForm(false); setEditingContact(null); showToast(id ? 'Contato atualizado.' : 'Contato adicionado.'); await refreshData()
   }
-  async function saveQuote(input: Omit<Quote, 'id' | 'created_at' | 'contacts' | 'signed_at' | 'signed_by' | 'signature_data' | 'signed_document_hash' | 'attachments'>, files: File[] = []) {
+  async function saveQuote(input: Omit<Quote, 'id' | 'created_at' | 'contacts' | 'signed_at' | 'signed_by' | 'signature_data' | 'signed_document_hash' | 'attachments'>, files: File[] = [], quickContact?: { name: string; phone: string }) {
     if (!supabase) return
     const { data: userResult, error: userError } = await supabase.auth.getUser()
     if (userError || !userResult.user) { showToast('Sua sessão expirou. Entre novamente para salvar o projeto.'); return }
@@ -140,9 +141,22 @@ export default function App() {
       uploadedPaths.push(path)
       attachments.push({ path, name: file.name, mime_type: file.type || 'application/octet-stream', size: file.size })
     }
-    const { data, error } = await supabase.from('quotes').insert({ ...input, id: quoteId, attachments }).select('*, contacts(name,phone,email,address)').single()
+    let contactId = input.contact_id
+    let createdContactId: string | null = null
+    if (!contactId && quickContact) {
+      const { data: createdContact, error: contactError } = await supabase.from('contacts').insert({ name: quickContact.name.trim(), phone: quickContact.phone.trim() }).select('id').single()
+      if (contactError || !createdContact) {
+        if (uploadedPaths.length) await supabase.storage.from('project-files').remove(uploadedPaths)
+        showToast('Não foi possível salvar os dados do cliente. Confira o WhatsApp e tente novamente.')
+        return
+      }
+      contactId = createdContact.id
+      createdContactId = createdContact.id
+    }
+    const { data, error } = await supabase.from('quotes').insert({ ...input, contact_id: contactId, id: quoteId, attachments }).select('*, contacts(name,phone,email,address)').single()
     if (error) {
       if (uploadedPaths.length) await supabase.storage.from('project-files').remove(uploadedPaths)
+      if (createdContactId) await supabase.from('contacts').delete().eq('id', createdContactId)
       showToast('Não foi possível salvar o projeto. Os arquivos enviados foram removidos.')
       return
     }
@@ -255,7 +269,7 @@ export default function App() {
       {page === 'contatos' && <ContactsPage contacts={filteredContacts} query={contactSearch} onQuery={setContactSearch} onAdd={() => { setEditingContact(null); setShowContactForm(true) }} onEdit={contact => { setEditingContact(contact); setShowContactForm(true) }} onDelete={deleteContact} />}
       {page === 'orcamentos' && <QuotesPage quotes={filteredQuotes} totalCount={quotes.length} pendingCount={pending} approvedCount={quotes.filter(quote => quote.status === 'approved').length} approvedTotal={approvedTotal} query={quoteSearch} onQuery={setQuoteSearch} filter={statusFilter} onFilter={setStatusFilter} onAdd={startProject} onSelect={setSelectedQuote} onDownload={downloadQuote} />}
       {page === 'produtos' && <Suspense fallback={<RouteLoader />}><ProductPage products={products} onSave={saveProduct} onArchive={archiveProduct} onReturnToProject={wizardPausedForCatalog ? () => { setPage('orcamentos'); setWizardPausedForCatalog(false); setShowProjectModal(true) } : undefined} /></Suspense>}
-      {(showProjectModal || wizardPausedForCatalog) && <div hidden={!showProjectModal}><Suspense fallback={<RouteLoader />}><Modal title="Novo projeto" subtitle="Defina cliente, itens, arquivos e condições." onClose={closeProjectModal} wide className="project-wizard-modal"><ProjectWizard contacts={contacts} products={products} onBack={closeProjectModal} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }} onManageProducts={() => { setWizardPausedForCatalog(true); setShowProjectModal(false); setPage('produtos') }} onSave={saveQuote} /></Modal></Suspense></div>}
+      {(showProjectModal || wizardPausedForCatalog) && <div hidden={!showProjectModal}><Suspense fallback={<RouteLoader />}><Modal title="Novo projeto" subtitle="Defina cliente, itens, arquivos e condições." onClose={closeProjectModal} wide className="project-wizard-modal"><ProjectWizard key={projectWizardInstance} contacts={contacts} products={products} onBack={closeProjectModal} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }} onManageProducts={() => { setWizardPausedForCatalog(true); setShowProjectModal(false); setPage('produtos') }} onSave={saveQuote} /></Modal></Suspense></div>}
       {page === 'compartilhar' && shareQuote && <Suspense fallback={<RouteLoader />}><ShareQuotePage quote={shareQuote} onBack={() => { setPage('orcamentos'); setShareQuote(null) }} onEditContact={() => { const contact = contacts.find(item => item.id === shareQuote.contact_id); setEditingContact(contact ?? null); setShowContactForm(true) }} /></Suspense>}
     </main>
     {showContactForm && <ContactDialog contact={editingContact} onClose={() => { setShowContactForm(false); setEditingContact(null) }} onSave={saveContact} />}
