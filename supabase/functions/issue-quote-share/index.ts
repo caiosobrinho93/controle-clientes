@@ -45,6 +45,11 @@ export default {
         quantity: Number(item.quantity ?? 0),
         unitPrice: Number(item.unitPrice ?? item.unit_price ?? 0),
       })) : []
+      const attachments = Array.isArray(quote.attachments) ? quote.attachments.map((file: Record<string, unknown>) => {
+        const path = String(file.path ?? '')
+        if (!path.startsWith(`${userData.user.id}/${quoteId}/`)) throw new Error('Invalid attachment ownership')
+        return { path, name: String(file.name ?? 'Arquivo do projeto'), mimeType: String(file.mime_type ?? 'application/octet-stream'), size: Number(file.size ?? 0) }
+      }) : []
       const snapshot = {
         number: String(quote.number),
         title: String(quote.title),
@@ -56,6 +61,7 @@ export default {
         paymentTerms: String(quote.payment_terms ?? ''),
         notes: String(quote.notes ?? ''),
         items,
+        attachments,
         subtotal: Number(quote.subtotal),
         discount: Number(quote.discount),
         total: Number(quote.total),

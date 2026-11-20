@@ -38,6 +38,7 @@ export default function App() {
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [shareQuote, setShareQuote] = useState<Quote | null>(null)
   const [wizardPausedForCatalog, setWizardPausedForCatalog] = useState(false)
+  const [showProjectModal, setShowProjectModal] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
   const [quoteSearch, setQuoteSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('Todos')
@@ -75,6 +76,8 @@ export default function App() {
   function showToast(message: string) { setToast(message) }
 
   const displayName = session?.user.user_metadata?.full_name || session?.user.email?.split('@')[0] || 'Minha oficina'
+  function startProject() { setPage('orcamentos'); setShareQuote(null); setWizardPausedForCatalog(false); setShowProjectModal(true) }
+  function closeProjectModal() { setShowProjectModal(false); setWizardPausedForCatalog(false) }
   const filteredContacts = useMemo(() => contacts.filter(contact => `${contact.name} ${contact.phone} ${contact.email}`.toLowerCase().includes(contactSearch.toLowerCase())), [contacts, contactSearch])
   const filteredQuotes = useMemo(() => quotes.filter(quote => {
     const matchesSearch = `${quote.number} ${quote.title} ${quote.contacts?.name ?? ''}`.toLowerCase().includes(quoteSearch.toLowerCase())
@@ -118,11 +121,32 @@ export default function App() {
     })
     setShowContactForm(false); setEditingContact(null); showToast(id ? 'Contato atualizado.' : 'Contato adicionado.'); await refreshData()
   }
-  async function saveQuote(input: Omit<Quote, 'id' | 'created_at' | 'contacts' | 'signed_at' | 'signed_by' | 'signature_data' | 'signed_document_hash'>) {
+  async function saveQuote(input: Omit<Quote, 'id' | 'created_at' | 'contacts' | 'signed_at' | 'signed_by' | 'signature_data' | 'signed_document_hash' | 'attachments'>, files: File[] = []) {
     if (!supabase) return
-    const { data, error } = await supabase.from('quotes').insert(input).select('*, contacts(name,phone,email,address)').single()
-    if (error) { showToast(error.message); return }
-    setPage('compartilhar'); setShareQuote(data as Quote); showToast('Orçamento salvo. Prepare o envio ao cliente.'); await refreshData()
+    const { data: userResult, error: userError } = await supabase.auth.getUser()
+    if (userError || !userResult.user) { showToast('Sua sessão expirou. Entre novamente para salvar o projeto.'); return }
+    const quoteId = crypto.randomUUID()
+    const uploadedPaths: string[] = []
+    const attachments: Quote['attachments'] = []
+    for (const file of files) {
+      const safeName = file.name.normalize('NFKD').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120) || 'arquivo'
+      const path = `${userResult.user.id}/${quoteId}/${crypto.randomUUID()}-${safeName}`
+      const { error: uploadError } = await supabase.storage.from('project-files').upload(path, file, { contentType: file.type || (file.name.toLowerCase().endsWith('.skp') ? 'application/octet-stream' : undefined), upsert: false })
+      if (uploadError) {
+        if (uploadedPaths.length) await supabase.storage.from('project-files').remove(uploadedPaths)
+        showToast(`Não foi possível anexar “${file.name}”. Confira a conexão e tente novamente.`)
+        return
+      }
+      uploadedPaths.push(path)
+      attachments.push({ path, name: file.name, mime_type: file.type || 'application/octet-stream', size: file.size })
+    }
+    const { data, error } = await supabase.from('quotes').insert({ ...input, id: quoteId, attachments }).select('*, contacts(name,phone,email,address)').single()
+    if (error) {
+      if (uploadedPaths.length) await supabase.storage.from('project-files').remove(uploadedPaths)
+      showToast('Não foi possível salvar o projeto. Os arquivos enviados foram removidos.')
+      return
+    }
+    setShowProjectModal(false); setWizardPausedForCatalog(false); setPage('compartilhar'); setShareQuote(data as Quote); showToast('Orçamento salvo. Prepare o envio ao cliente.'); await refreshData()
   }
   async function saveProduct(input: Pick<Product, 'name' | 'unit' | 'cost_price'>, id?: string): Promise<boolean> {
     if (!supabase) return false
@@ -178,6 +202,11 @@ export default function App() {
     doc.setTextColor(47, 51, 43); doc.setFont('helvetica', 'normal'); doc.setFontSize(9)
     const terms = [quote.valid_until ? `Validade: ${datePt(quote.valid_until)}` : '', quote.delivery_estimate ? `Prazo de entrega: ${quote.delivery_estimate}` : '', quote.payment_terms ? `Pagamento: ${quote.payment_terms}` : '', quote.notes ? `Observações: ${quote.notes}` : ''].filter(Boolean)
     terms.forEach(line => { const lines = doc.splitTextToSize(line, 168) as string[]; doc.text(lines, left, y); y += Math.max(6, lines.length * 5) })
+    if (quote.attachments?.length) {
+      y += 4; doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.text('ARQUIVOS ANEXADOS À PROPOSTA', left, y); y += 6
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
+      quote.attachments.forEach(file => { if (y > 270) { doc.addPage(); y = 22 }; const lines = doc.splitTextToSize(file.name, 168) as string[]; doc.text(lines, left, y); y += Math.max(5, lines.length * 4) })
+    }
     y += 6; doc.setDrawColor(222, 222, 214); doc.line(left, y, right, y); y += 8
     doc.setFontSize(8); doc.setTextColor(113, 117, 107); doc.text('Este orçamento é uma proposta comercial para análise e aprovação do cliente.', left, y)
     if (quote.signed_at && quote.signed_by && quote.signature_data) {
@@ -202,7 +231,7 @@ export default function App() {
 
   const navItems: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
     { id: 'inicio', label: 'Visão geral', icon: LayoutDashboard },
-    { id: 'orcamentos', label: 'Orçamentos', icon: ClipboardList },
+    { id: 'orcamentos', label: 'Projetos', icon: ClipboardList },
     { id: 'contatos', label: 'Contatos', icon: Users },
     { id: 'produtos', label: 'Produtos', icon: Box },
   ]
@@ -216,17 +245,17 @@ export default function App() {
       <div className="workspace-switch"><span className="workspace-avatar"><HardHat size={17} /></span><span className="workspace-copy"><b>{displayName}</b><small>Plano inicial</small></span><ChevronDown size={15} /></div>
       <div className="nav-caption">MENU PRINCIPAL</div>
       <nav className="side-nav" aria-label="Navegação principal">
-      {navItems.map(item => <button key={item.id} className={`nav-item ${page === item.id || (item.id === 'orcamentos' && page === 'novo-projeto') ? 'active' : ''}`} onClick={() => { setPage(item.id); setWizardPausedForCatalog(false); setMobileNav(false) }}><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'orcamentos' && pending > 0 && <span className="nav-count">{pending}</span>}</button>)}
+      {navItems.map(item => <button key={item.id} className={`nav-item ${page === item.id ? 'active' : ''}`} onClick={() => { setPage(item.id); closeProjectModal(); setMobileNav(false) }}><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'orcamentos' && pending > 0 && <span className="nav-count">{pending}</span>}</button>)}
       </nav>
       <div className="sidebar-bottom"><div className="user-profile"><span className="user-avatar">{displayName.slice(0, 1).toUpperCase()}</span><span className="user-copy"><b>{displayName}</b><small>{session.user.email}</small></span><button className="icon-button" title="Sair da conta" onClick={signOut}><LogOut size={17} /></button></div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" onClick={() => setMobileNav(true)} aria-label="Abrir menu"><Menu size={20} /></button><div className="breadcrumb">Sua oficina <span>/</span> <b>{page === 'compartilhar' ? 'Compartilhar orçamento' : page === 'novo-projeto' ? 'Novo projeto' : navItems.find(item => item.id === page)?.label}</b></div></div><div className="topbar-actions"><span className="today-label">{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span><span className="top-avatar">{displayName.slice(0, 1).toUpperCase()}</span></div></header>
-      {page === 'inicio' && <DashboardPage displayName={displayName} contacts={contacts} quotes={quotes} loading={loading} pending={pending} approvedTotal={approvedTotal} onOpenQuotes={() => setPage('orcamentos')} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }} onNewQuote={() => { setPage('novo-projeto'); setShareQuote(null) }} onSelectQuote={setSelectedQuote} onDownload={downloadQuote} />}
+      {page === 'inicio' && <DashboardPage displayName={displayName} contacts={contacts} quotes={quotes} loading={loading} pending={pending} approvedTotal={approvedTotal} onOpenQuotes={() => setPage('orcamentos')} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }} onNewQuote={startProject} onSelectQuote={setSelectedQuote} onDownload={downloadQuote} />}
       {page === 'contatos' && <ContactsPage contacts={filteredContacts} query={contactSearch} onQuery={setContactSearch} onAdd={() => { setEditingContact(null); setShowContactForm(true) }} onEdit={contact => { setEditingContact(contact); setShowContactForm(true) }} onDelete={deleteContact} />}
-      {page === 'orcamentos' && <QuotesPage quotes={filteredQuotes} query={quoteSearch} onQuery={setQuoteSearch} filter={statusFilter} onFilter={setStatusFilter} onAdd={() => { setPage('novo-projeto'); setShareQuote(null) }} onSelect={setSelectedQuote} onDownload={downloadQuote} />}
-      {page === 'produtos' && <Suspense fallback={<RouteLoader />}><ProductPage products={products} onSave={saveProduct} onArchive={archiveProduct} onReturnToProject={wizardPausedForCatalog ? () => { setPage('novo-projeto'); setWizardPausedForCatalog(false) } : undefined} /></Suspense>}
-      {(page === 'novo-projeto' || wizardPausedForCatalog) && <div hidden={page !== 'novo-projeto'}><Suspense fallback={<RouteLoader />}><ProjectWizard contacts={contacts} products={products} onBack={() => { setPage('orcamentos'); setWizardPausedForCatalog(false) }} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }} onManageProducts={() => { setWizardPausedForCatalog(true); setPage('produtos') }} onSave={saveQuote} /></Suspense></div>}
+      {page === 'orcamentos' && <QuotesPage quotes={filteredQuotes} totalCount={quotes.length} pendingCount={pending} approvedCount={quotes.filter(quote => quote.status === 'approved').length} approvedTotal={approvedTotal} query={quoteSearch} onQuery={setQuoteSearch} filter={statusFilter} onFilter={setStatusFilter} onAdd={startProject} onSelect={setSelectedQuote} onDownload={downloadQuote} />}
+      {page === 'produtos' && <Suspense fallback={<RouteLoader />}><ProductPage products={products} onSave={saveProduct} onArchive={archiveProduct} onReturnToProject={wizardPausedForCatalog ? () => { setPage('orcamentos'); setWizardPausedForCatalog(false); setShowProjectModal(true) } : undefined} /></Suspense>}
+      {(showProjectModal || wizardPausedForCatalog) && <div hidden={!showProjectModal}><Suspense fallback={<RouteLoader />}><Modal title="Novo projeto" subtitle="Defina cliente, itens, arquivos e condições." onClose={closeProjectModal} wide className="project-wizard-modal"><ProjectWizard contacts={contacts} products={products} onBack={closeProjectModal} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }} onManageProducts={() => { setWizardPausedForCatalog(true); setShowProjectModal(false); setPage('produtos') }} onSave={saveQuote} /></Modal></Suspense></div>}
       {page === 'compartilhar' && shareQuote && <Suspense fallback={<RouteLoader />}><ShareQuotePage quote={shareQuote} onBack={() => { setPage('orcamentos'); setShareQuote(null) }} onEditContact={() => { const contact = contacts.find(item => item.id === shareQuote.contact_id); setEditingContact(contact ?? null); setShowContactForm(true) }} /></Suspense>}
     </main>
     {showContactForm && <ContactDialog contact={editingContact} onClose={() => { setShowContactForm(false); setEditingContact(null) }} onSave={saveContact} />}
@@ -236,7 +265,7 @@ export default function App() {
 }
 
 function SetupScreen() {
-  return <div className="setup-page"><div className="setup-card"><span className="brand-mark setup-mark"><Hammer size={20} /></span><p className="eyebrow">OFICINA · PRIMEIROS PASSOS</p><h1>Conecte sua oficina</h1><p>O dashboard usa Supabase Auth e banco de dados com políticas de acesso por conta. Configure o projeto para começar.</p><ol><li><span>1</span><div><b>Crie um projeto no Supabase</b><small>Copie a URL e a chave publishable do projeto.</small></div></li><li><span>2</span><div><b>Configure as variáveis locais</b><small>Duplique <code>.env.example</code> como <code>.env.local</code> e preencha os valores.</small></div></li><li><span>3</span><div><b>Crie as tabelas e políticas</b><small>Execute as duas migrações em <code>supabase/migrations</code> pela ordem do nome.</small></div></li><li><span>4</span><div><b>Configure os endpoints seguros</b><small>Publique as funções Edge e defina <code>QUOTE_CODE_HMAC_SECRET</code> no Supabase.</small></div></li></ol><div className="setup-note"><ShieldCheck size={17} /><span>Custos, códigos e dados de assinatura ficam protegidos por conta.</span></div><code className="env-sample">VITE_SUPABASE_URL=…<br />VITE_SUPABASE_PUBLISHABLE_KEY=…</code></div></div>
+  return <div className="setup-page"><div className="setup-card"><span className="brand-mark setup-mark"><Hammer size={20} /></span><p className="eyebrow">OFICINA · PRIMEIROS PASSOS</p><h1>Conecte sua oficina</h1><p>O dashboard usa Supabase Auth e banco de dados com políticas de acesso por conta. Configure o projeto para começar.</p><ol><li><span>1</span><div><b>Crie um projeto no Supabase</b><small>Copie a URL e a chave publishable do projeto.</small></div></li><li><span>2</span><div><b>Configure as variáveis locais</b><small>Duplique <code>.env.example</code> como <code>.env.local</code> e preencha os valores.</small></div></li><li><span>3</span><div><b>Crie as tabelas e políticas</b><small>Execute as migrações em <code>supabase/migrations</code> pela ordem do nome.</small></div></li><li><span>4</span><div><b>Configure os endpoints seguros</b><small>Publique as funções Edge e defina <code>QUOTE_CODE_HMAC_SECRET</code> no Supabase.</small></div></li></ol><div className="setup-note"><ShieldCheck size={17} /><span>Custos, códigos, arquivos e dados de assinatura ficam protegidos por conta.</span></div><code className="env-sample">VITE_SUPABASE_URL=…<br />VITE_SUPABASE_PUBLISHABLE_KEY=…</code></div></div>
 }
 
 function PublicUnavailable() {
@@ -263,9 +292,9 @@ function ContactsPage({ contacts, query, onQuery, onAdd, onEdit, onDelete }: { c
   return <div className="page-content"><div className="page-heading"><div><span className="eyebrow">RELACIONAMENTO</span><h1>Contatos</h1><p>Seus clientes, sempre por perto.</p></div><button className="primary-button" onClick={onAdd}><Plus size={17} /> Adicionar contato</button></div><div className="content-toolbar"><div className="search-box"><Search size={17} /><input value={query} onChange={event => onQuery(event.target.value)} placeholder="Buscar por nome, telefone ou e-mail" /></div><span className="result-count">{contacts.length} {contacts.length === 1 ? 'contato' : 'contatos'}</span></div>{contacts.length === 0 ? <EmptyState icon={<Users size={24} />} title={query ? 'Nenhum contato encontrado' : 'Sua lista começa aqui'} description={query ? 'Tente buscar por outro nome ou telefone.' : 'Cadastre seus clientes para criar projetos com mais facilidade.'} action={!query ? 'Adicionar contato' : undefined} onAction={onAdd} /> : <div className="contact-grid">{contacts.map(contact => <article className="contact-card" key={contact.id}><div className="contact-card-top"><span className="contact-avatar">{contact.name.slice(0, 1).toUpperCase()}</span><div className="contact-actions"><button className="icon-button" title="Editar contato" onClick={() => onEdit(contact)}><Pencil size={15} /></button><button className="icon-button contact-delete" title="Excluir contato" onClick={() => onDelete(contact)}><X size={16} /></button></div></div><h3>{contact.name}</h3><div className="contact-lines">{contact.phone ? <span><MessageCircle size={14} />WhatsApp · {formatWhatsApp(contact.phone)}</span> : null}{contact.email ? <span><Mail size={14} />{contact.email}</span> : null}{contact.address ? <span className="contact-address">{contact.address}</span> : null}{!contact.phone && !contact.email && !contact.address && <span className="muted">Sem dados adicionais</span>}</div><div className="contact-card-footer"><span>Desde {datePt(contact.created_at)}</span><span className="contact-status"><i /> CLIENTE</span></div></article>)}</div>}</div>
 }
 
-function QuotesPage({ quotes, query, onQuery, filter, onFilter, onAdd, onSelect, onDownload }: { quotes: Quote[]; query: string; onQuery: (value: string) => void; filter: StatusFilter; onFilter: (value: StatusFilter) => void; onAdd: () => void; onSelect: (quote: Quote) => void; onDownload: (quote: Quote) => void }) {
+function QuotesPage({ quotes, totalCount, pendingCount, approvedCount, approvedTotal, query, onQuery, filter, onFilter, onAdd, onSelect, onDownload }: { quotes: Quote[]; totalCount: number; pendingCount: number; approvedCount: number; approvedTotal: number; query: string; onQuery: (value: string) => void; filter: StatusFilter; onFilter: (value: StatusFilter) => void; onAdd: () => void; onSelect: (quote: Quote) => void; onDownload: (quote: Quote) => void }) {
   const filters: StatusFilter[] = ['Todos', 'Pendente', 'Aprovado', 'Recusado']
-  return <div className="page-content"><div className="page-heading"><div><span className="eyebrow">PROPOSTAS DE SERVIÇO</span><h1>Orçamentos</h1><p>Monte propostas e acompanhe cada retorno.</p></div><button className="primary-button" onClick={onAdd}><Plus size={17} /> Novo orçamento</button></div><div className="quotes-toolbar"><div className="filter-tabs">{filters.map(item => <button key={item} className={filter === item ? 'selected' : ''} onClick={() => onFilter(item)}>{item}</button>)}</div><div className="search-box"><Search size={17} /><input value={query} onChange={event => onQuery(event.target.value)} placeholder="Buscar orçamento" /></div></div><div className="table-card"><QuoteTable quotes={quotes} loading={false} onSelect={onSelect} onDownload={onDownload} /></div>{quotes.length === 0 && <EmptyState icon={<FileText size={24} />} title="Nenhum orçamento por aqui" description={query || filter !== 'Todos' ? 'Altere a busca ou o filtro para ver outros resultados.' : 'Crie sua primeira proposta para começar a acompanhar os serviços.'} action={!query && filter === 'Todos' ? 'Criar orçamento' : undefined} onAction={onAdd} />}</div>
+  return <div className="page-content"><div className="page-heading"><div><span className="eyebrow">ACOMPANHAMENTO DA OFICINA</span><h1>Projetos</h1><p>Propostas, aprovações e próximos passos em um só lugar.</p></div><button className="primary-button" onClick={onAdd}><Plus size={17} /> Novo projeto</button></div><div className="stats-grid project-metrics"><StatCard icon={<ClipboardList size={18} />} label="Projetos" value={String(totalCount).padStart(2, '0')} detail="propostas criadas" tone="sage" /><StatCard icon={<Clock3 size={18} />} label="Aguardando cliente" value={String(pendingCount).padStart(2, '0')} detail="pendentes de resposta" tone="amber" /><StatCard icon={<Check size={18} />} label="Aprovados" value={String(approvedCount).padStart(2, '0')} detail="confirmados para executar" tone="blue" /><StatCard icon={<Wallet size={18} />} label="Valor aprovado" value={brl(approvedTotal)} detail="em projetos aprovados" tone="lilac" /></div><div className="quotes-toolbar"><div className="filter-tabs">{filters.map(item => <button key={item} className={filter === item ? 'selected' : ''} onClick={() => onFilter(item)}>{item}</button>)}</div><div className="search-box"><Search size={17} /><input value={query} onChange={event => onQuery(event.target.value)} placeholder="Buscar projeto ou cliente" /></div></div>{quotes.length > 0 ? <div className="table-card"><QuoteTable quotes={quotes} loading={false} onSelect={onSelect} onDownload={onDownload} /></div> : <EmptyState icon={<FileText size={24} />} title="Nenhum projeto por aqui" description={query || filter !== 'Todos' ? 'Altere a busca ou o filtro para ver outros resultados.' : 'Crie seu primeiro projeto para acompanhar cada etapa.'} action={!query && filter === 'Todos' ? 'Criar projeto' : undefined} onAction={onAdd} />}</div>
 }
 
 function QuoteTable({ quotes, loading, onSelect, onDownload }: { quotes: Quote[]; loading: boolean; onSelect: (quote: Quote) => void; onDownload: (quote: Quote) => void }) {
@@ -277,7 +306,7 @@ function QuoteTable({ quotes, loading, onSelect, onDownload }: { quotes: Quote[]
 function StatusPill({ status }: { status: Quote['status'] }) { const labels = { pending: 'Pendente', approved: 'Aprovado', rejected: 'Recusado' }; return <span className={`status-pill ${status}`}><i />{labels[status]}</span> }
 function EmptyState({ icon, title, description, action, onAction }: { icon: ReactNode; title: string; description: string; action?: string; onAction: () => void }) { return <div className="empty-state"><span className="empty-icon">{icon}</span><h3>{title}</h3><p>{description}</p>{action && <button className="primary-button" onClick={onAction}><Plus size={16} />{action}</button>}</div> }
 
-function Modal({ title, subtitle, onClose, children, wide = false }: { title: string; subtitle: string; onClose: () => void; children: ReactNode; wide?: boolean }) { return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}><section className={`modal-card ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true"><div className="modal-header"><div><span className="eyebrow">OFICINA</span><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button></div>{children}</section></div> }
+function Modal({ title, subtitle, onClose, children, wide = false, className = '' }: { title: string; subtitle: string; onClose: () => void; children: ReactNode; wide?: boolean; className?: string }) { return <div className={`modal-backdrop ${className ? `${className}-backdrop` : ''}`} onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}><section className={`modal-card ${wide ? 'modal-wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-label={title}><div className="modal-header"><div><span className="eyebrow">OFICINA</span><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button></div>{children}</section></div> }
 
 function ContactDialog({ contact, onClose, onSave }: { contact: Contact | null; onClose: () => void; onSave: (values: Omit<Contact, 'id' | 'created_at'>, id?: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false)
@@ -286,5 +315,21 @@ function ContactDialog({ contact, onClose, onSave }: { contact: Contact | null; 
 }
 
 function QuoteDetail({ quote, onClose, onDownload, onShare }: { quote: Quote; onClose: () => void; onDownload: (quote: Quote) => void; onShare: () => void }) {
-  return <Modal title={quote.number} subtitle={quote.title} onClose={onClose} wide><div className="quote-detail"><div className="detail-summary"><div><span className="detail-label">CLIENTE</span><b>{quote.contacts?.name || 'Cliente'}</b><small>{quote.contacts?.phone || quote.contacts?.email || 'Sem dados de contato'}</small></div><div><span className="detail-label">CRIADO EM</span><b>{datePt(quote.created_at)}</b><small>Validade {quote.valid_until ? datePt(quote.valid_until) : 'não definida'}</small></div><div><span className="detail-label">STATUS</span><StatusPill status={quote.status} /></div></div><div className="detail-items">{quote.items.map((item, index) => <div className="detail-item" key={`${item.description}-${index}`}><span><b>{item.description}</b><small>{item.quantity} {item.unit || 'un'} × {brl(item.unitPrice)}</small></span><strong>{brl(item.quantity * item.unitPrice)}</strong></div>)}</div><div className="detail-totals"><span>Preço sugerido <b>{brl(quote.subtotal)}</b></span>{quote.discount > 0 && <span>Desconto <b>− {brl(quote.discount)}</b></span>}<span className="grand-total">Valor final <b>{brl(quote.total)}</b></span></div>{quote.notes && <div className="detail-notes"><b>Observações</b><p>{quote.notes}</p></div>}{quote.payment_terms && <div className="detail-notes"><b>Pagamento</b><p>{quote.payment_terms}</p></div>}{quote.signed_at && <div className="signed-note"><ShieldCheck size={16} /><span>Assinado digitalmente por <b>{quote.signed_by}</b> em {new Date(quote.signed_at).toLocaleString('pt-BR')}.</span></div>}<div className="detail-actions"><div>{quote.status === 'pending' && <button className="approve-button" onClick={onShare}><LockKeyhole size={15} /> Compartilhar com código</button>}</div><button className="primary-button" onClick={() => onDownload(quote)}><ArrowDownToLine size={16} /> {quote.signed_at ? 'Baixar contrato assinado' : 'Baixar proposta PDF'}</button></div></div></Modal>
+  return <Modal title={quote.number} subtitle={quote.title} onClose={onClose} wide><div className="quote-detail"><div className="detail-summary"><div><span className="detail-label">CLIENTE</span><b>{quote.contacts?.name || 'Cliente'}</b><small>{quote.contacts?.phone || quote.contacts?.email || 'Sem dados de contato'}</small></div><div><span className="detail-label">CRIADO EM</span><b>{datePt(quote.created_at)}</b><small>Validade {quote.valid_until ? datePt(quote.valid_until) : 'não definida'}</small></div><div><span className="detail-label">STATUS</span><StatusPill status={quote.status} /></div></div><div className="detail-items">{quote.items.map((item, index) => <div className="detail-item" key={`${item.description}-${index}`}><span><b>{item.description}</b><small>{item.quantity} {item.unit || 'un'} × {brl(item.unitPrice)}</small></span><strong>{brl(item.quantity * item.unitPrice)}</strong></div>)}</div><div className="detail-totals"><span>Preço sugerido <b>{brl(quote.subtotal)}</b></span>{quote.discount > 0 && <span>Desconto <b>− {brl(quote.discount)}</b></span>}<span className="grand-total">Valor final <b>{brl(quote.total)}</b></span></div><QuoteAttachments attachments={quote.attachments ?? []} />{quote.notes && <div className="detail-notes"><b>Observações</b><p>{quote.notes}</p></div>}{quote.payment_terms && <div className="detail-notes"><b>Pagamento</b><p>{quote.payment_terms}</p></div>}{quote.signed_at && <div className="signed-note"><ShieldCheck size={16} /><span>Assinado digitalmente por <b>{quote.signed_by}</b> em {new Date(quote.signed_at).toLocaleString('pt-BR')}.</span></div>}<div className="detail-actions"><div>{quote.status === 'pending' && <button className="approve-button" onClick={onShare}><LockKeyhole size={15} /> Compartilhar com código</button>}</div><button className="primary-button" onClick={() => onDownload(quote)}><ArrowDownToLine size={16} /> {quote.signed_at ? 'Baixar contrato assinado' : 'Baixar proposta PDF'}</button></div></div></Modal>
+}
+
+function QuoteAttachments({ attachments }: { attachments: Quote['attachments'] }) {
+  const [links, setLinks] = useState<{ name: string; url: string }[]>([])
+  useEffect(() => {
+    let active = true
+    const client = supabase
+    if (!client || attachments.length === 0) { setLinks([]); return }
+    void Promise.all(attachments.map(async file => {
+      const { data } = await client.storage.from('project-files').createSignedUrl(file.path, 300)
+      return data?.signedUrl ? { name: file.name, url: data.signedUrl } : null
+    })).then(results => { if (active) setLinks(results.filter((link): link is { name: string; url: string } => Boolean(link))) })
+    return () => { active = false }
+  }, [attachments])
+  if (!attachments.length) return null
+  return <section className="quote-attachments"><h3>Arquivos do projeto</h3><div className="quote-attachments-list">{attachments.map((file, index) => { const link = links.find(item => item.name === file.name); return link ? <a className="quote-attachment-link" href={link.url} target="_blank" rel="noreferrer" key={`${file.path}-${index}`}><FileText size={17} /><span>{file.name}</span><small>{Math.ceil(file.size / 1024)} KB</small><ArrowDownToLine size={16} /></a> : <div className="quote-attachment-link" key={`${file.path}-${index}`}><FileText size={17} /><span>{file.name}</span><small>Carregando…</small></div> })}</div></section>
 }

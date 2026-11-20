@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type FormEvent } from 'react'
-import { ArrowDownToLine, Check, CheckCircle2, CircleAlert, Clock3, Hammer, LoaderCircle, LockKeyhole, RotateCcw, ShieldCheck } from 'lucide-react'
+import { ArrowDownToLine, Check, CheckCircle2, CircleAlert, Clock3, FileText, Hammer, LoaderCircle, LockKeyhole, RotateCcw, ShieldCheck } from 'lucide-react'
 import { supabase } from './lib/supabase'
 
 type PublicItem = { description: string; unit: string; quantity: number; unitPrice: number }
+type PublicAttachment = { name: string; mimeType: string; size: number; url: string }
 type PublicQuote = {
   number: string; title: string; shopName: string; clientName: string; createdAt: string; validUntil: string | null
-  deliveryEstimate: string; paymentTerms: string; notes: string; items: PublicItem[]; subtotal: number; discount: number; total: number; acceptanceText: string
+  deliveryEstimate: string; paymentTerms: string; notes: string; items: PublicItem[]; attachments: PublicAttachment[]; subtotal: number; discount: number; total: number; acceptanceText: string
 }
 const money = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value) || 0)
 const date = (value: string) => new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR')
@@ -70,6 +71,11 @@ export default function PublicQuotePage({ token }: { token: string }) {
       if (y + lines.length * 5 > 265) { doc.addPage(); y = 22 }
       doc.text(lines, left, y); y += Math.max(7, lines.length * 5)
     })
+    if (quote.attachments?.length) {
+      y += 4; doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.text('ARQUIVOS ANEXADOS AO PROJETO', left, y); y += 6
+      doc.setFont('helvetica', 'normal')
+      quote.attachments.forEach(file => { const lines = doc.splitTextToSize(file.name, right - left) as string[]; if (y + lines.length * 4 > 265) { doc.addPage(); y = 22 }; doc.text(lines, left, y); y += Math.max(5, lines.length * 4) })
+    }
     y += 4; doc.setDrawColor(222, 222, 214); doc.line(left, y, right, y); y += 8
     doc.setFont('helvetica', 'bold'); doc.text(`Valor aceito: ${money(quote.total)}`, left, y); y += 8
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
@@ -103,6 +109,7 @@ export default function PublicQuotePage({ token }: { token: string }) {
         <div className="public-totals"><div><span>Subtotal</span><b>{money(quote.subtotal)}</b></div>{quote.discount > 0 && <div className="public-discount"><span>Desconto</span><b>− {money(quote.discount)}</b></div>}<div className="public-total"><span>Valor do projeto</span><b>{money(quote.total)}</b></div></div>
         <div className="public-conditions">{quote.deliveryEstimate && <div><Clock3 size={15} /><span><small>PRAZO ESTIMADO</small><b>{quote.deliveryEstimate}</b></span></div>}{quote.paymentTerms && <div><span className="condition-symbol">R$</span><span><small>CONDIÇÕES DE PAGAMENTO</small><b>{quote.paymentTerms}</b></span></div>}{quote.notes && <div className="public-note"><span><small>OBSERVAÇÕES</small><b>{quote.notes}</b></span></div>}</div>
       </section>
+      {quote.attachments?.length > 0 && <section className="public-attachments"><div><span className="public-attachment-icon"><FileText size={18} /></span><span><b>Arquivos do projeto</b><small>Referências para consultar antes de confirmar.</small></span></div><ul>{quote.attachments.map((file, index) => <li key={`${file.name}-${index}`}><a href={file.url} target="_blank" rel="noreferrer"><FileText size={16} /><span>{file.name}<small>{file.mimeType === 'application/pdf' ? 'PDF' : file.name.toLowerCase().endsWith('.skp') ? 'SketchUp' : 'Imagem'} · {(file.size / (1024 * 1024)).toFixed(1)} MB</small></span><ArrowDownToLine size={16} /></a></li>)}</ul></section>}
       {status === 'signed' ? <section className="signature-success"><div className="success-check"><Check size={22} /></div><div><h2>Aceite registrado</h2><p>Assinatura confirmada por <b>{signedBy || fullName || quote.clientName}</b>{signedAt && <> em {new Date(signedAt).toLocaleString('pt-BR')}.</>}</p><span>Baixe uma cópia do aceite para guardar com você.</span><button className="secondary-button" onClick={() => void downloadSignedCopy()}><ArrowDownToLine size={16} /> Baixar proposta assinada</button></div></section>
         : status === 'locked' ? <section className="public-locked"><LockKeyhole size={19} /><div><b>O código precisa ser renovado</b><span>Para proteger sua assinatura, as tentativas se esgotaram. Peça um novo código à marcenaria.</span></div></section>
           : <section className="public-sign-panel"><div className="sign-panel-heading"><span className="sign-shield"><ShieldCheck size={18} /></span><div><h2>De acordo com o projeto?</h2><p>Confirme sua identidade e assine pelo celular.</p></div></div><div className="sign-steps"><span><i>1</i> Código no WhatsApp</span><span><i>2</i> Nome e assinatura</span></div><form onSubmit={submit} className="public-sign-form"><label className="public-label">Código de segurança<input className="security-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={code} onChange={event => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" required /></label><label className="public-label">Seu nome completo<input type="text" autoComplete="name" maxLength={120} minLength={3} value={fullName} onChange={event => setFullName(event.target.value)} placeholder="Como aparece no seu documento" required /></label><label className="public-label signature-label">Sua assinatura<span>Assine com o dedo dentro do quadro.</span><SignaturePad key={signaturePadKey} onChange={setSignature} /></label><button type="button" className="signature-clear" onClick={() => { setSignature(''); setSignaturePadKey(key => key + 1) }}><RotateCcw size={13} /> Limpar assinatura</button><label className="consent-row"><input type="checkbox" checked={consented} onChange={event => setConsented(event.target.checked)} /><span>{quote.acceptanceText}</span></label>{error && <div className="public-form-error" role="alert"><CircleAlert size={15} />{error}</div>}<button type="submit" className="sign-submit" disabled={busy || !consented || !signature}>{busy ? <><LoaderCircle className="spin" size={17} /> Validando sua assinatura…</> : <><CheckCircle2 size={18} /> Confirmar e assinar proposta</>}</button><p className="sign-security"><LockKeyhole size={13} /> O código é de uso único e só pode ser tentado 5 vezes.</p></form></section>}

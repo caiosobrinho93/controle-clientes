@@ -33,6 +33,12 @@ export type QuoteItem = {
   unitCost: number
   unitPrice: number
 }
+export type QuoteAttachment = {
+  path: string
+  name: string
+  mime_type: string
+  size: number
+}
 export type Quote = {
   id: string
   contact_id: string | null
@@ -49,6 +55,7 @@ export type Quote = {
   delivery_estimate: string
   payment_terms: string
   notes: string
+  attachments: QuoteAttachment[]
   created_at: string
   signed_at: string | null
   signed_by: string | null
