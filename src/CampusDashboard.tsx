@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, Box, ClipboardList, Focus, Maximize, Minimize, Minus, Plus, RotateCcw, Users, X } from 'lucide-react'
+import { ArrowRight, Box, ClipboardList, Focus, Maximize, Minimize, Minus, Plus, RotateCcw, SlidersHorizontal, Users, X } from 'lucide-react'
 import type { Sector } from './CampusScene'
 import './campus-dashboard.css'
 
@@ -26,8 +26,9 @@ interface Props {
 export default function CampusDashboard(props: Props) {
   const workspace = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
+  const [showTools, setShowTools] = useState(false)
   const [showData, setShowData] = useState(false)
-  const dataToggle = useRef<HTMLButtonElement>(null)
+  const toolsToggle = useRef<HTMLButtonElement>(null)
   const [walking, setWalking] = useState(false)
   const [room, setRoom] = useState('Pátio')
   const [reduced, setReduced] = useState(() => matchMedia(motionQuery).matches)
@@ -59,6 +60,7 @@ export default function CampusDashboard(props: Props) {
   const active = sector ? modules[sector] : null
 
   function select(next: Sector | null) {
+    setShowTools(false)
     setShowData(false)
     setSector(next)
     setZoom(1)
@@ -90,26 +92,52 @@ export default function CampusDashboard(props: Props) {
         <header className="campus-heading">
           <div><h1 id="campus-map-heading">Central da oficina</h1><p>{props.name} · Sede conceitual</p></div>
           <div className="campus-heading-actions">
-            {!fullscreen && !walking && <button ref={dataToggle} type="button" className="campus-control"
-              aria-expanded={showData} aria-controls="campus-office-data" onClick={() => {
-                if (sector) select(null)
-                setShowData(!showData)
-              }}><ClipboardList size={17} /> Resumo</button>}
-            <button type="button" className="campus-control campus-toggle" aria-pressed={enabled} onClick={toggleScene}>{enabled ? 'Desativar 3D' : 'Ativar 3D'}</button>
-            {document.fullscreenEnabled && <button type="button" className="campus-control" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} title={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen}>
-              {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-            </button>}
+            <button ref={toolsToggle} type="button" className="campus-control" aria-label="Opções da oficina"
+              aria-expanded={showTools} aria-controls="campus-tools" onClick={() => {
+                setShowData(false)
+                setShowTools(value => !value)
+              }}><SlidersHorizontal size={18} /> Opções</button>
+            {showTools && <section id="campus-tools" className="campus-tools" aria-label="Opções da oficina"
+              onKeyDown={event => { if (event.key === 'Escape') { setShowTools(false); toolsToggle.current?.focus() } }}>
+              <div className="campus-tools-row">
+                {!fullscreen && !walking && <button type="button" className="campus-control"
+                  aria-expanded={showData} aria-controls="campus-office-data" onClick={() => {
+                    if (sector) select(null)
+                    setShowTools(false)
+                    setShowData(!showData)
+                  }}><ClipboardList size={17} /> Resumo</button>}
+                <button type="button" className="campus-control campus-toggle" aria-pressed={enabled} onClick={toggleScene}>{enabled ? 'Desativar 3D' : 'Ativar 3D'}</button>
+                {document.fullscreenEnabled && <button type="button" className="campus-control" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} title={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={() => { setShowTools(false); void toggleFullscreen() }}>
+                  {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                </button>}
+              </div>
+              {!walking && <>
+                <span className="campus-tools-label">Setores da sede</span>
+                <div className="campus-sectors" aria-label="Setores da sede">
+                  {(Object.keys(modules) as Sector[]).map(key =>
+                    <button key={key} type="button" className="campus-control" aria-pressed={sector === key} onClick={() => select(key)}>
+                      {modules[key].label}
+                    </button>)}
+                </div>
+                {enabled && ready && <div className="campus-camera" aria-label="Controles da câmera">
+                  <button type="button" className="campus-control" aria-label="Afastar câmera" disabled={zoom <= .8} onClick={() => setZoom(value => Math.max(.8, value - .15))}><Minus size={17} /></button>
+                  <button type="button" className="campus-control" aria-label="Aproximar câmera" disabled={zoom >= 1.45} onClick={() => setZoom(value => Math.min(1.45, value + .15))}><Plus size={17} /></button>
+                  <button type="button" className="campus-control" title="Visão geral" aria-label="Restaurar visão geral" onClick={() => select(null)}><RotateCcw size={16} /></button>
+                  {!reduced && <button type="button" className="campus-control" onClick={() => setMoving(value => !value)}>{moving ? 'Pausar movimento' : 'Ativar movimento'}</button>}
+                </div>}
+              </>}
+            </section>}
             <button type="button" className="primary-button" onClick={createProject}><Plus size={18} /> Novo projeto</button>
           </div>
           <section id="campus-office-data" hidden={!showData} className="campus-data" aria-labelledby="campus-data-heading"
             onKeyDown={event => {
-              if (event.key === 'Escape') { setShowData(false); dataToggle.current?.focus() }
+              if (event.key === 'Escape') { setShowData(false); toolsToggle.current?.focus() }
             }}>
             <header className="campus-data-heading">
               <h2 id="campus-data-heading">Resumo da oficina</h2>
               <button type="button" className="campus-control" aria-label="Fechar resumo" onClick={() => {
                 setShowData(false)
-                dataToggle.current?.focus()
+                toolsToggle.current?.focus()
               }}><X size={18} /></button>
             </header>
             <dl className="campus-metrics">
@@ -141,24 +169,9 @@ export default function CampusDashboard(props: Props) {
           </div>
         </div>
         <div className="campus-map-footer">
-          {walking ? <span className="campus-walk-help">Use WASD, setas ou os botões de direção</span> :
-          <div className="campus-sectors" aria-label="Setores da sede">
-            {(Object.keys(modules) as Sector[]).map(key =>
-              <button key={key} type="button" className="campus-control" aria-pressed={sector === key} onClick={() => select(key)}>
-                {modules[key].label}
-              </button>)}
-          </div>}
-          {enabled && ready && <div className="campus-camera" aria-label="Controles da câmera">
-            <button type="button" className="campus-control campus-explore" aria-pressed={walking} onClick={() => { select(null); setWalking(value => !value) }}>
+          {enabled && ready && <button type="button" className="campus-control campus-explore" aria-pressed={walking} onClick={() => { select(null); setWalking(value => !value) }}>
               {walking ? 'Voltar à vista aérea' : 'Explorar a pé'}
-            </button>
-            {!walking && <>
-            <button type="button" className="campus-control" aria-label="Afastar câmera" disabled={zoom <= .8} onClick={() => setZoom(value => Math.max(.8, value - .15))}><Minus size={17} /></button>
-            <button type="button" className="campus-control" aria-label="Aproximar câmera" disabled={zoom >= 1.45} onClick={() => setZoom(value => Math.min(1.45, value + .15))}><Plus size={17} /></button>
-            <button type="button" className="campus-control" title="Visão geral" aria-label="Restaurar visão geral" onClick={() => select(null)}><RotateCcw size={16} /></button>
-            {!reduced && <button type="button" className="campus-control" onClick={() => setMoving(value => !value)}>{moving ? 'Pausar movimento' : 'Ativar movimento'}</button>}
-            </>}
-          </div>}
+            </button>}
         </div>
       </section>
       {active && sector && <aside className="campus-context" aria-label="Setor selecionado">
