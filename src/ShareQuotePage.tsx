@@ -6,7 +6,10 @@ const money = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'curren
 
 export default function ShareQuotePage({ quote, onBack, onEditContact }: { quote: Quote; onBack: () => void; onEditContact: () => void }) {
   const [busy, setBusy] = useState(false)
-  const [share, setShare] = useState<{ token: string; code: string; phone: string; expiresAt: string } | null>(null)
+  const [share, setShare] = useState<{ token: string; code: string; roomCode?: string; phone: string; expiresAt: string } | null>(null)
+  const [roomPaths, setRoomPaths] = useState<string[]>([])
+  const models = (quote.attachments ?? []).filter(file => file.path.toLowerCase().endsWith('.glb'))
+  const showroomUrl = share ? new URL(import.meta.env.BASE_URL + 'showroom#minha-sala/' + share.token, window.location.origin).href : ''
   const [error, setError] = useState('')
   const [copied, setCopied] = useState('')
   const shareUrl = share ? `${window.location.origin}/p/${share.token}` : ''
@@ -15,11 +18,18 @@ export default function ShareQuotePage({ quote, onBack, onEditContact }: { quote
   async function prepareShare() {
     if (!supabase) return
     setBusy(true); setError('')
-    const { data, error: invokeError } = await supabase.functions.invoke('issue-quote-share', { body: { quoteId: quote.id } })
+    const { data, error: invokeError } = await supabase.functions.invoke('issue-quote-share', {
+      body: { quoteId: quote.id, ...(models.length ? { roomPaths } : {}) },
+    })
     if (invokeError || data?.error) {
       setError(await readFunctionError(invokeError, data?.error)); setBusy(false); return
     }
-    setShare({ token: data.token, code: data.code, phone: data.phone, expiresAt: data.expiresAt })
+    if (roomPaths.length && !data?.roomCode) {
+      setError('O servidor ainda não gerou o código da sala. Tente novamente depois que a atualização estiver ativa.')
+      setBusy(false)
+      return
+    }
+    setShare({ token: data.token, code: data.code, roomCode: data.roomCode, phone: data.phone, expiresAt: data.expiresAt })
     setBusy(false)
   }
 
@@ -28,7 +38,8 @@ export default function ShareQuotePage({ quote, onBack, onEditContact }: { quote
     `O orçamento ${quote.number} — ${quote.title} está pronto para você analisar:`,
     shareUrl,
     `Código de segurança para assinar: ${share.code}`,
-    'O link e o código valem por 7 dias. O código é de uso único.',
+    'O link e o código de assinatura valem por 7 dias. A assinatura é de uso único.',
+    ...(share.roomCode ? [`Veja seus móveis na sala 3D: ${showroomUrl}`, `Código da sala (válido por 7 dias): ${share.roomCode}`] : []),
     'Se você não solicitou este orçamento, pode desconsiderar esta mensagem.',
   ].join('\n\n') : ''
   const whatsappUrl = share ? `https://wa.me/${share.phone}?text=${encodeURIComponent(message)}` : ''
@@ -42,7 +53,22 @@ export default function ShareQuotePage({ quote, onBack, onEditContact }: { quote
     <div className="share-heading"><div className="share-success-mark"><Check size={22} /></div><span className="eyebrow">ORÇAMENTO PRONTO PARA COMPARTILHAR</span><h1>Agora, o cliente decide.</h1><p>Envie o link privado e o código de assinatura diretamente no WhatsApp.</p></div>
     <div className="share-layout"><section className="share-left"><div className="share-quote-preview"><div className="share-doc-icon"><span><Check size={16} /></span></div><div className="share-doc-copy"><span>PROPOSTA {quote.number}</span><h2>{quote.title}</h2><small>Para {quote.contacts?.name || 'cliente'} · {quote.items.length} {quote.items.length === 1 ? 'item' : 'itens'}</small></div><div className="share-amount"><span>VALOR FINAL</span><b>{money(quote.total)}</b></div></div>
       <div className="share-flow"><div className={`share-flow-step ${share ? 'completed' : 'current'}`}><span>{share ? <Check size={15} /> : '1'}</span><div><b>Gerar link e código</b><small>Um acesso exclusivo, com validade de 7 dias.</small></div></div><div className={`share-flow-step ${share ? 'current' : ''}`}><span>2</span><div><b>Enviar pelo WhatsApp</b><small>Mensagem pronta para o cliente da proposta.</small></div></div><div className="share-flow-step"><span>3</span><div><b>Cliente analisa e assina</b><small>Sem criar conta. O código confirma o aceite.</small></div></div></div>
+      {models.length > 0 && !share && <fieldset className="share-security-card share-room-models" disabled={busy}>
+        <legend>Sala 3D do cliente</legend>
+        <p>Escolha até oito móveis. Somente os modelos selecionados ficam disponíveis com o código da sala.</p>
+        {models.map(file => <label key={file.path}>
+          <input type="checkbox" checked={roomPaths.includes(file.path)} disabled={roomPaths.length === 8 && !roomPaths.includes(file.path)}
+            onChange={event => setRoomPaths(paths => event.target.checked ? [...paths, file.path] : paths.filter(path => path !== file.path))} />
+          {file.name}
+        </label>)}
+      </fieldset>}
       {error && <div className="share-error" role="alert">{error}</div>}
+      {share?.roomCode && <div className="share-security-card share-room-models">
+        <h3>Código da sala 3D</h3><code>{share.roomCode}</code>
+        <button type="button" className="secondary-button" onClick={() => copy(share.roomCode!, 'room')}>
+          {copied === 'room' ? 'Código copiado' : 'Copiar código da sala'}
+        </button>
+      </div>}
       {!share ? <button className="primary-button share-create-button" disabled={busy || digits.length < 10} onClick={prepareShare}><LockKeyhole size={17} />{busy ? 'Preparando acesso seguro…' : 'Gerar link privado'}{!busy && <ArrowRight size={16} />}</button> : <div className="share-issued"><div className="share-issued-heading"><ShieldCheck size={18} /><div><b>Link e código estão prontos</b><span>Compartilhe os dois na mesma mensagem.</span></div></div><div className="share-field"><span>LINK DO ORÇAMENTO</span><div><a href={shareUrl} target="_blank" rel="noreferrer">{shareUrl}</a><button onClick={() => copy(shareUrl, 'link')} aria-label="Copiar link">{copied === 'link' ? <Check size={16} /> : <Copy size={16} />}</button></div></div><div className="share-field code-field"><span>CÓDIGO DE SEGURANÇA</span><div><b>{share.code}</b><button onClick={() => copy(share.code, 'code')} aria-label="Copiar código">{copied === 'code' ? <Check size={16} /> : <Copy size={16} />}</button></div></div><div className="share-expiry"><LockKeyhole size={13} /> Válido até {new Date(share.expiresAt).toLocaleDateString('pt-BR')} · usado uma única vez.</div><a className="primary-button whatsapp-send" href={whatsappUrl} target="_blank" rel="noreferrer"><MessageCircle size={18} /> Abrir WhatsApp com a mensagem <ExternalLink size={14} /></a><p className="whatsapp-note">O WhatsApp abrirá com o texto preenchido. Revise e toque em enviar.</p></div>}
       {!share && digits.length < 10 && <div className="missing-phone"><MessageCircle size={16} /><span>Adicione um WhatsApp válido ao contato para compartilhar esta proposta.</span><button onClick={onEditContact}>Editar contato</button></div>}
     </section><aside className="share-security-card"><div className="share-security-icon"><LockKeyhole size={18} /></div><h3>Uma assinatura com proteção extra.</h3><p>O código só vai para o WhatsApp cadastrado do cliente. Ele não aparece no link nem é guardado em texto aberto.</p><div className="security-rule"><span><Check size={13} /></span>Até 5 tentativas para digitar o código</div><div className="security-rule"><span><Check size={13} /></span>O código é válido por 7 dias</div><div className="security-rule"><span><Check size={13} /></span>O cliente não precisa fazer cadastro</div><div className="privacy-caption"><ShieldCheck size={14} /> O custo e o multiplicador ficam privados.</div></aside></div>

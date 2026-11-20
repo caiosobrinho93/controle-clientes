@@ -10,3 +10,5 @@ dist/
 output/playwright/
 
 supabase/.temp/
+
+.showroom-local/

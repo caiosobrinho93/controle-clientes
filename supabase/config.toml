@@ -6,3 +6,6 @@ verify_jwt = false
 
 [functions.sign-quote]
 verify_jwt = false
+
+[functions.open-showroom-room]
+verify_jwt = false

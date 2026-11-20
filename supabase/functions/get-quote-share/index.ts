@@ -19,7 +19,9 @@ export default {
 
       if (error || !share || share.revoked_at || new Date(share.expires_at).getTime() <= Date.now()) return json({ error: 'Este link expirou ou não está mais ativo.' }, 410)
       const snapshot = share.snapshot as Record<string, unknown>
-      const attachments = Array.isArray(snapshot.attachments) ? await Promise.all(snapshot.attachments.map(async (file: Record<string, unknown>) => {
+      const attachments = Array.isArray(snapshot.attachments) ? await Promise.all(snapshot.attachments
+        .filter((file: Record<string, unknown>) => !String(file.path).toLowerCase().endsWith('.glb'))
+        .map(async (file: Record<string, unknown>) => {
         const path = String(file.path ?? '')
         if (!path.startsWith(`${share.user_id}/${share.quote_id}/`)) throw new Error('Invalid attachment ownership')
         const { data, error: signError } = await context.supabaseAdmin.storage.from('project-files').createSignedUrl(path, 30 * 60)

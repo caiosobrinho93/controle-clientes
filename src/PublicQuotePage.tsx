@@ -6,7 +6,7 @@ type PublicItem = { description: string; unit: string; quantity: number; unitPri
 type PublicAttachment = { name: string; mimeType: string; size: number; url: string }
 type PublicQuote = {
   number: string; title: string; shopName: string; clientName: string; createdAt: string; validUntil: string | null
-  deliveryEstimate: string; paymentTerms: string; notes: string; items: PublicItem[]; attachments: PublicAttachment[]; subtotal: number; discount: number; total: number; acceptanceText: string
+  deliveryEstimate: string; paymentTerms: string; notes: string; items: PublicItem[]; attachments: PublicAttachment[]; subtotal: number; discount: number; total: number; acceptanceText: string; hasShowroom?: boolean
 }
 const money = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value) || 0)
 const date = (value: string) => new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR')
@@ -109,6 +109,10 @@ export default function PublicQuotePage({ token }: { token: string }) {
         <div className="public-totals"><div><span>Subtotal</span><b>{money(quote.subtotal)}</b></div>{quote.discount > 0 && <div className="public-discount"><span>Desconto</span><b>− {money(quote.discount)}</b></div>}<div className="public-total"><span>Valor do projeto</span><b>{money(quote.total)}</b></div></div>
         <div className="public-conditions">{quote.deliveryEstimate && <div><Clock3 size={15} /><span><small>PRAZO ESTIMADO</small><b>{quote.deliveryEstimate}</b></span></div>}{quote.paymentTerms && <div><span className="condition-symbol">R$</span><span><small>CONDIÇÕES DE PAGAMENTO</small><b>{quote.paymentTerms}</b></span></div>}{quote.notes && <div className="public-note"><span><small>OBSERVAÇÕES</small><b>{quote.notes}</b></span></div>}</div>
       </section>
+      {quote.hasShowroom && <section className="public-attachments">
+        <div><span><b>Veja seus móveis em 3D</b><small>Use o código da sala enviado junto com esta proposta pelo WhatsApp.</small></span></div>
+        <ul><li><a href={import.meta.env.BASE_URL + 'showroom#minha-sala/' + token}>Abrir minha sala</a></li></ul>
+      </section>}
       {quote.attachments?.length > 0 && <section className="public-attachments"><div><span className="public-attachment-icon"><FileText size={18} /></span><span><b>Arquivos do projeto</b><small>Referências para consultar antes de confirmar.</small></span></div><ul>{quote.attachments.map((file, index) => <li key={`${file.name}-${index}`}><a href={file.url} target="_blank" rel="noreferrer"><FileText size={16} /><span>{file.name}<small>{file.mimeType === 'application/pdf' ? 'PDF' : file.name.toLowerCase().endsWith('.skp') ? 'SketchUp' : 'Imagem'} · {(file.size / (1024 * 1024)).toFixed(1)} MB</small></span><ArrowDownToLine size={16} /></a></li>)}</ul></section>}
       {status === 'signed' ? <section className="signature-success"><div className="success-check"><Check size={22} /></div><div><h2>Aceite registrado</h2><p>Assinatura confirmada por <b>{signedBy || fullName || quote.clientName}</b>{signedAt && <> em {new Date(signedAt).toLocaleString('pt-BR')}.</>}</p><span>Baixe uma cópia do aceite para guardar com você.</span><button className="secondary-button" onClick={() => void downloadSignedCopy()}><ArrowDownToLine size={16} /> Baixar proposta assinada</button></div></section>
         : status === 'locked' ? <section className="public-locked"><LockKeyhole size={19} /><div><b>O código precisa ser renovado</b><span>Para proteger sua assinatura, as tentativas se esgotaram. Peça um novo código à marcenaria.</span></div></section>

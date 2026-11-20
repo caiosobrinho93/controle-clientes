@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowRight, Box, Check, ChevronDown, ClipboardList, Clock3, FileText, Hammer, HardHat, LayoutDashboard, LoaderCircle, LockKeyhole, LogOut, Mail, Menu, MessageCircle, Pencil, Plus, Search, ShieldCheck, Users, Wallet, X } from 'lucide-react'
 import { isSupabaseConfigured, supabase, type Contact, type Product, type Quote } from './lib/supabase'
+import CampusDashboard from './CampusDashboard'
 const ProductPage = lazy(() => import('./ProductPage'))
 const ProjectWizard = lazy(() => import('./ProjectWizard'))
 const PublicQuotePage = lazy(() => import('./PublicQuotePage'))
@@ -132,14 +133,15 @@ export default function App() {
     for (const file of files) {
       const safeName = file.name.normalize('NFKD').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120) || 'arquivo'
       const path = `${userResult.user.id}/${quoteId}/${crypto.randomUUID()}-${safeName}`
-      const { error: uploadError } = await supabase.storage.from('project-files').upload(path, file, { contentType: file.type || (file.name.toLowerCase().endsWith('.skp') ? 'application/octet-stream' : undefined), upsert: false })
+      const mimeType = file.name.toLowerCase().endsWith('.glb') ? 'model/gltf-binary' : file.type || 'application/octet-stream'
+      const { error: uploadError } = await supabase.storage.from('project-files').upload(path, file, { contentType: mimeType, upsert: false })
       if (uploadError) {
         if (uploadedPaths.length) await supabase.storage.from('project-files').remove(uploadedPaths)
         showToast(`Não foi possível anexar “${file.name}”. Confira a conexão e tente novamente.`)
         return
       }
       uploadedPaths.push(path)
-      attachments.push({ path, name: file.name, mime_type: file.type || 'application/octet-stream', size: file.size })
+      attachments.push({ path, name: file.name, mime_type: mimeType, size: file.size })
     }
     let contactId = input.contact_id
     let createdContactId: string | null = null
@@ -167,6 +169,16 @@ export default function App() {
     const result = id ? await supabase.from('catalog_products').update(input).eq('id', id) : await supabase.from('catalog_products').insert(input)
     if (result.error) { showToast('Não foi possível salvar o produto.'); return false }
     await refreshData(); showToast(id ? 'Produto atualizado.' : 'Produto adicionado ao catálogo.'); return true
+  }
+  async function updateQuote(quote: Quote, changes: Pick<Quote, 'title' | 'status' | 'items' | 'cost_subtotal' | 'subtotal' | 'valid_until' | 'delivery_estimate' | 'payment_terms' | 'notes' | 'discount' | 'total'>) {
+    if (!supabase) return false
+    const { data, error } = await supabase.from('quotes').update(changes).eq('id', quote.id).select('*, contacts(name,phone,email,address)').single()
+    if (error || !data) { showToast('Não foi possível atualizar o orçamento.'); return false }
+    const updated = data as Quote
+    setQuotes(current => current.map(item => item.id === updated.id ? updated : item))
+    setSelectedQuote(updated)
+    showToast('Orçamento atualizado.')
+    return true
   }
   async function archiveProduct(product: Product) {
     if (!supabase) return
@@ -252,7 +264,7 @@ export default function App() {
   const pending = quotes.filter(quote => quote.status === 'pending').length
   const approvedTotal = quotes.filter(quote => quote.status === 'approved').reduce((sum, quote) => sum + quote.total, 0)
 
-  return <div className="app-shell">
+  return <div className={page === 'inicio' ? 'app-shell campus-shell' : 'app-shell'}>
     {mobileNav && <button className="mobile-scrim" aria-label="Fechar menu" onClick={() => setMobileNav(false)} />}
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
       <div className="brand"><span className="brand-mark"><Hammer size={19} strokeWidth={1.7} /></span><span className="brand-name">oficina<span className="brand-dot">.</span><small>GESTÃO DE MARCENARIA</small></span><button className="mobile-close icon-button" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={18} /></button></div>
@@ -265,7 +277,15 @@ export default function App() {
     </aside>
     <main className="main-area">
       <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" onClick={() => setMobileNav(true)} aria-label="Abrir menu"><Menu size={20} /></button><div className="breadcrumb">Sua oficina <span>/</span> <b>{page === 'compartilhar' ? 'Compartilhar orçamento' : page === 'novo-projeto' ? 'Novo projeto' : navItems.find(item => item.id === page)?.label}</b></div></div><div className="topbar-actions"><span className="today-label">{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span><span className="top-avatar">{displayName.slice(0, 1).toUpperCase()}</span></div></header>
-      {page === 'inicio' && <DashboardPage displayName={displayName} contacts={contacts} quotes={quotes} loading={loading} pending={pending} approvedTotal={approvedTotal} onOpenQuotes={() => setPage('orcamentos')} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }} onNewQuote={startProject} onSelectQuote={setSelectedQuote} onDownload={downloadQuote} />}
+      {page === 'inicio' && <CampusDashboard name={displayName} clients={contacts.length} products={products.filter(product => product.is_active).length}
+        projects={quotes.length} pending={pending} approved={quotes.filter(quote => quote.status === 'approved').length} approvedTotal={approvedTotal}
+        loading={loading} onNewQuote={startProject} onNewContact={() => { setEditingContact(null); setShowContactForm(true) }}
+        onOpen={sector => {
+          setPage(sector === 'production' ? 'orcamentos' : sector === 'showroom' ? 'contatos' : 'produtos')
+          window.scrollTo(0, 0)
+        }}>
+        <QuoteTable quotes={quotes.slice(0, 5)} loading={loading} onSelect={setSelectedQuote} onDownload={downloadQuote} />
+      </CampusDashboard>}
       {page === 'contatos' && <ContactsPage contacts={filteredContacts} query={contactSearch} onQuery={setContactSearch} onAdd={() => { setEditingContact(null); setShowContactForm(true) }} onEdit={contact => { setEditingContact(contact); setShowContactForm(true) }} onDelete={deleteContact} />}
       {page === 'orcamentos' && <QuotesPage quotes={filteredQuotes} totalCount={quotes.length} pendingCount={pending} approvedCount={quotes.filter(quote => quote.status === 'approved').length} approvedTotal={approvedTotal} query={quoteSearch} onQuery={setQuoteSearch} filter={statusFilter} onFilter={setStatusFilter} onAdd={startProject} onSelect={setSelectedQuote} onDownload={downloadQuote} />}
       {page === 'produtos' && <Suspense fallback={<RouteLoader />}><ProductPage products={products} onSave={saveProduct} onArchive={archiveProduct} onReturnToProject={wizardPausedForCatalog ? () => { setPage('orcamentos'); setWizardPausedForCatalog(false); setShowProjectModal(true) } : undefined} /></Suspense>}
@@ -273,7 +293,7 @@ export default function App() {
       {page === 'compartilhar' && shareQuote && <Suspense fallback={<RouteLoader />}><ShareQuotePage quote={shareQuote} onBack={() => { setPage('orcamentos'); setShareQuote(null) }} onEditContact={() => { const contact = contacts.find(item => item.id === shareQuote.contact_id); setEditingContact(contact ?? null); setShowContactForm(true) }} /></Suspense>}
     </main>
     {showContactForm && <ContactDialog contact={editingContact} onClose={() => { setShowContactForm(false); setEditingContact(null) }} onSave={saveContact} />}
-    {selectedQuote && <QuoteDetail quote={selectedQuote} onClose={() => setSelectedQuote(null)} onDownload={downloadQuote} onShare={() => { setShareQuote(selectedQuote); setSelectedQuote(null); setPage('compartilhar') }} />}
+    {selectedQuote && <QuoteDetail quote={selectedQuote} onClose={() => setSelectedQuote(null)} onDownload={downloadQuote} onUpdate={updateQuote} onShare={() => { setShareQuote(selectedQuote); setSelectedQuote(null); setPage('compartilhar') }} />}
     {toast && <div className="toast" role="status"><Check size={16} />{toast}</div>}
   </div>
 }
@@ -294,12 +314,6 @@ function AuthScreen({ mode, onSwitchMode, onSubmit, error, message, busy }: { mo
   return <div className="auth-page"><div className="auth-intro"><div className="brand auth-brand"><span className="brand-mark"><Hammer size={19} /></span><span className="brand-name">oficina<span className="brand-dot">.</span><small>GESTÃO DE MARCENARIA</small></span></div><div className="intro-copy"><span className="eyebrow">MAIS TEMPO NO QUE IMPORTA</span><h1>Sua marcenaria,<br /><i>bem organizada.</i></h1><p>Contatos, orçamentos e propostas prontas para compartilhar. Tudo em um só lugar, só seu.</p><div className="intro-points"><span><Check size={15} /> Seus dados sempre privados</span><span><Check size={15} /> Orçamentos em PDF para enviar</span></div></div><div className="intro-footer">FEITO PARA QUEM TRANSFORMA MADEIRA EM HISTÓRIA</div></div><div className="auth-form-side"><div className="auth-form-wrap"><span className="auth-mark"><Hammer size={19} /></span><div className="auth-heading"><h2>{mode === 'login' ? 'Bem-vindo de volta' : 'Crie sua conta'}</h2><p>{mode === 'login' ? 'Entre para cuidar da sua oficina.' : 'Organize sua marcenaria em poucos passos.'}</p></div><form onSubmit={onSubmit} className="form-stack">{mode === 'signup' && <label>Nome da oficina<input name="name" autoComplete="organization" placeholder="Ex.: Marcenaria Horizonte" required minLength={2} /></label>}<label>E-mail<input name="email" type="email" autoComplete="email" placeholder="voce@exemplo.com" required /></label><label>Senha<input name="password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="Mínimo de 6 caracteres" required minLength={6} /></label>{error && <div className="form-error" role="alert">{error}</div>}{message && <div className="form-success" role="status">{message}</div>}<button className="primary-button auth-submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : mode === 'login' ? 'Entrar na minha oficina' : 'Criar minha conta'}<ArrowRight size={16} /></button></form><p className="auth-switch">{mode === 'login' ? 'Ainda não tem conta?' : 'Já tem uma conta?'} <button onClick={onSwitchMode}>{mode === 'login' ? 'Criar conta' : 'Fazer login'}</button></p><div className="auth-privacy"><ShieldCheck size={16} /> Seus dados e os da sua oficina ficam protegidos.</div></div></div></div>
 }
 
-function DashboardPage({ displayName, contacts, quotes, loading, pending, approvedTotal, onOpenQuotes, onNewContact, onNewQuote, onSelectQuote, onDownload }: { displayName: string; contacts: Contact[]; quotes: Quote[]; loading: boolean; pending: number; approvedTotal: number; onOpenQuotes: () => void; onNewContact: () => void; onNewQuote: () => void; onSelectQuote: (quote: Quote) => void; onDownload: (quote: Quote) => void }) {
-  const date = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
-  const recent = quotes.slice(0, 5)
-  return <div className="page-content"><div className="page-heading"><div><span className="eyebrow">{date}</span><h1>Bom trabalho, {displayName.split(' ')[0]} <span className="wave">✳</span></h1><p>Veja como sua oficina está indo hoje.</p></div><button className="primary-button" onClick={onNewQuote}><Plus size={17} /> Novo projeto</button></div><div className="welcome-banner"><div className="banner-content"><span className="banner-kicker">UM PASSO DE CADA VEZ</span><h2>Uma boa peça começa<br />com uma boa organização.</h2><p>Registre seus contatos e deixe os orçamentos prontos para apresentar.</p><button onClick={onNewContact}>Adicionar primeiro contato <ArrowRight size={15} /></button></div><div className="banner-graphic"><div className="graphic-ring ring-one" /><div className="graphic-ring ring-two" /><div className="wood-board board-one" /><div className="wood-board board-two" /><div className="graphic-stamp"><Hammer size={23} /></div><span className="graphic-label">FEITO À MÃO</span></div><span className="banner-index">01 — OFICINA</span></div><div className="stats-grid"><StatCard icon={<ClipboardList size={18} />} label="Orçamentos" value={String(quotes.length).padStart(2, '0')} detail="propostas criadas" tone="sage" /><StatCard icon={<Clock3 size={18} />} label="Aguardando retorno" value={String(pending).padStart(2, '0')} detail="em análise pelo cliente" tone="amber" /><StatCard icon={<Users size={18} />} label="Seus contatos" value={String(contacts.length).padStart(2, '0')} detail="clientes cadastrados" tone="blue" /><StatCard icon={<Wallet size={18} />} label="Aprovados" value={brl(approvedTotal)} detail="em serviços aprovados" tone="lilac" /></div><section className="section-block"><div className="section-heading"><div><span className="eyebrow">ACOMPANHAMENTO</span><h2>Orçamentos recentes</h2></div><button className="text-button" onClick={onOpenQuotes}>Ver todos <ArrowRight size={15} /></button></div><div className="table-card"><QuoteTable quotes={recent} loading={loading} onSelect={onSelectQuote} onDownload={onDownload} /></div></section><div className="dashboard-bottom"><div className="mini-card contacts-mini"><div className="mini-card-head"><span className="mini-icon"><Users size={17} /></span><button className="icon-button" title="Adicionar contato" onClick={onNewContact}><Plus size={17} /></button></div><b>{contacts.length === 1 ? '1 contato na sua lista' : `${contacts.length} contatos na sua lista`}</b><span>Tenha os dados dos seus clientes sempre à mão.</span><button onClick={onNewContact}>Adicionar contato <ArrowRight size={14} /></button></div><div className="mini-card quote-mini"><div className="mini-card-head"><span className="mini-icon dark"><FileText size={17} /></span><span className="mini-tag">PDF PRONTO</span></div><b>Uma proposta clara faz diferença.</b><span>Crie o projeto e baixe um PDF pronto para compartilhar.</span><button onClick={onNewQuote}>Criar projeto <ArrowRight size={14} /></button></div></div></div>
-}
-
 function StatCard({ icon, label, value, detail, tone }: { icon: ReactNode; label: string; value: string; detail: string; tone: string }) { return <div className="stat-card"><div className={`stat-icon ${tone}`}>{icon}</div><span className="stat-label">{label}</span><strong className={value.length > 9 ? 'stat-money' : ''}>{value}</strong><span className="stat-detail">{detail}</span></div> }
 
 function ContactsPage({ contacts, query, onQuery, onAdd, onEdit, onDelete }: { contacts: Contact[]; query: string; onQuery: (value: string) => void; onAdd: () => void; onEdit: (contact: Contact) => void; onDelete: (contact: Contact) => void }) {
@@ -314,7 +328,10 @@ function QuotesPage({ quotes, totalCount, pendingCount, approvedCount, approvedT
 function QuoteTable({ quotes, loading, onSelect, onDownload }: { quotes: Quote[]; loading: boolean; onSelect: (quote: Quote) => void; onDownload: (quote: Quote) => void }) {
   if (loading && quotes.length === 0) return <div className="table-loading"><LoaderCircle className="spin" size={20} />Carregando orçamentos…</div>
   if (quotes.length === 0) return <div className="table-empty">Seus orçamentos aparecerão aqui.</div>
-  return <div className="table-scroll"><table><thead><tr><th>ORÇAMENTO</th><th>CLIENTE</th><th>DATA</th><th>VALOR</th><th>STATUS</th><th aria-label="Ações" /></tr></thead><tbody>{quotes.map(quote => <tr key={quote.id}><td data-label="Orçamento"><button className="quote-number" onClick={() => onSelect(quote)}><span className="quote-file-icon"><FileText size={16} /></span><span><b>{quote.number}</b><small>{quote.title}</small></span></button></td><td data-label="Cliente"><span className="table-client"><i>{(quote.contacts?.name || 'C').slice(0, 1).toUpperCase()}</i>{quote.contacts?.name || 'Cliente'}</span></td><td data-label="Data">{datePt(quote.created_at)}</td><td data-label="Valor" className="table-value">{brl(quote.total)}</td><td data-label="Status"><StatusPill status={quote.status} /></td><td data-label="PDF"><button className="download-button" title="Baixar PDF" aria-label={`Baixar PDF do orçamento ${quote.number}`} onClick={() => onDownload(quote)}><ArrowDownToLine size={19} /></button></td></tr>)}</tbody></table></div>
+  return <>
+    <div className="table-scroll quote-table-desktop"><table><thead><tr><th>ORÇAMENTO</th><th>CLIENTE</th><th>DATA</th><th>VALOR</th><th>STATUS</th><th aria-label="Ações" /></tr></thead><tbody>{quotes.map(quote => <tr className="quote-row-clickable" key={quote.id} onClick={() => onSelect(quote)}><td data-label="Orçamento"><button className="quote-number" onClick={() => onSelect(quote)}><span className="quote-file-icon"><FileText size={16} /></span><span><b>{quote.number}</b><small>{quote.title}</small></span></button></td><td data-label="Cliente"><span className="table-client"><i>{(quote.contacts?.name || 'C').slice(0, 1).toUpperCase()}</i>{quote.contacts?.name || 'Cliente'}</span></td><td data-label="Data">{datePt(quote.created_at)}</td><td data-label="Valor" className="table-value">{brl(quote.total)}</td><td data-label="Status"><StatusPill status={quote.status} /></td><td data-label="PDF"><button className="download-button" title="Baixar PDF" aria-label={`Baixar PDF do orçamento ${quote.number}`} onClick={event => { event.stopPropagation(); onDownload(quote) }}><ArrowDownToLine size={19} /></button></td></tr>)}</tbody></table></div>
+    <div className="quote-list-mobile">{quotes.map(quote => { const statusLabel = quote.status === 'pending' ? 'Pendente' : quote.status === 'approved' ? 'Aprovado' : 'Recusado'; return <button className="quote-mobile-row" key={quote.id} onClick={() => onSelect(quote)} aria-label={`Abrir ${quote.number}, ${quote.title}, ${quote.contacts?.name || 'Cliente'}, status ${statusLabel}`}><span className={`quote-mobile-status ${quote.status}`} aria-hidden="true" /><span className="quote-mobile-main"><b>{quote.number}</b><small>{quote.title}</small><span className="quote-mobile-client">{quote.contacts?.name || 'Cliente'}</span></span><span className="quote-mobile-date">{datePt(quote.created_at)}</span></button> })}</div>
+  </>
 }
 
 function StatusPill({ status }: { status: Quote['status'] }) { const labels = { pending: 'Pendente', approved: 'Aprovado', rejected: 'Recusado' }; return <span className={`status-pill ${status}`}><i />{labels[status]}</span> }
@@ -328,8 +345,43 @@ function ContactDialog({ contact, onClose, onSave }: { contact: Contact | null; 
   return <Modal title={contact ? 'Editar contato' : 'Novo contato'} subtitle={contact ? 'Atualize os dados do cliente.' : 'Guarde os dados do cliente para seus projetos.'} onClose={onClose}><form className="dialog-form" onSubmit={submit}><label>Nome do cliente <em>*</em><input name="name" defaultValue={contact?.name} placeholder="Ex.: Mariana Costa" required minLength={2} autoFocus /></label><div className="form-row"><label>WhatsApp<input name="phone" type="tel" defaultValue={contact?.phone} placeholder="(11) 99999-9999" /></label><label>E-mail<input name="email" type="email" defaultValue={contact?.email} placeholder="cliente@exemplo.com" /></label></div><label>Endereço<input name="address" defaultValue={contact?.address} placeholder="Rua, número, cidade" /></label><label>Observações<textarea name="notes" defaultValue={contact?.notes} rows={3} placeholder="Preferências, detalhes importantes…" /></label><div className="dialog-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : contact ? <Check size={16} /> : <Plus size={16} />}{contact ? 'Salvar contato' : 'Adicionar contato'}</button></div></form></Modal>
 }
 
-function QuoteDetail({ quote, onClose, onDownload, onShare }: { quote: Quote; onClose: () => void; onDownload: (quote: Quote) => void; onShare: () => void }) {
-  return <Modal title={quote.number} subtitle={quote.title} onClose={onClose} wide><div className="quote-detail"><div className="detail-summary"><div><span className="detail-label">CLIENTE</span><b>{quote.contacts?.name || 'Cliente'}</b><small>{quote.contacts?.phone || quote.contacts?.email || 'Sem dados de contato'}</small></div><div><span className="detail-label">CRIADO EM</span><b>{datePt(quote.created_at)}</b><small>Validade {quote.valid_until ? datePt(quote.valid_until) : 'não definida'}</small></div><div><span className="detail-label">STATUS</span><StatusPill status={quote.status} /></div></div><div className="detail-items">{quote.items.map((item, index) => <div className="detail-item" key={`${item.description}-${index}`}><span><b>{item.description}</b><small>{item.quantity} {item.unit || 'un'} × {brl(item.unitPrice)}</small></span><strong>{brl(item.quantity * item.unitPrice)}</strong></div>)}</div><div className="detail-totals"><span>Preço sugerido <b>{brl(quote.subtotal)}</b></span>{quote.discount > 0 && <span>Desconto <b>− {brl(quote.discount)}</b></span>}<span className="grand-total">Valor final <b>{brl(quote.total)}</b></span></div><QuoteAttachments attachments={quote.attachments ?? []} />{quote.notes && <div className="detail-notes"><b>Observações</b><p>{quote.notes}</p></div>}{quote.payment_terms && <div className="detail-notes"><b>Pagamento</b><p>{quote.payment_terms}</p></div>}{quote.signed_at && <div className="signed-note"><ShieldCheck size={16} /><span>Assinado digitalmente por <b>{quote.signed_by}</b> em {new Date(quote.signed_at).toLocaleString('pt-BR')}.</span></div>}<div className="detail-actions"><div>{quote.status === 'pending' && <button className="approve-button" onClick={onShare}><LockKeyhole size={15} /> Compartilhar com código</button>}</div><button className="primary-button" onClick={() => onDownload(quote)}><ArrowDownToLine size={16} /> {quote.signed_at ? 'Baixar contrato assinado' : 'Baixar proposta PDF'}</button></div></div></Modal>
+function QuoteDetail({ quote, onClose, onDownload, onShare, onUpdate }: { quote: Quote; onClose: () => void; onDownload: (quote: Quote) => void; onShare: () => void; onUpdate: (quote: Quote, changes: Pick<Quote, 'title' | 'status' | 'items' | 'cost_subtotal' | 'subtotal' | 'valid_until' | 'delivery_estimate' | 'payment_terms' | 'notes' | 'discount' | 'total'>) => Promise<boolean> }) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [finalValue, setFinalValue] = useState(String(quote.total))
+  const [quoteItems, setQuoteItems] = useState(quote.items)
+  const [form, setForm] = useState({ title: quote.title, status: quote.status, valid_until: quote.valid_until ?? '', delivery_estimate: quote.delivery_estimate, payment_terms: quote.payment_terms, notes: quote.notes })
+  const setField = <K extends keyof typeof form>(key: K, value: typeof form[K]) => setForm(current => ({ ...current, [key]: value }))
+  const editedSubtotal = quoteItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const subtotal = Math.round(editedSubtotal * 100) / 100
+    const costSubtotal = Math.round(quoteItems.reduce((sum, item) => sum + item.quantity * item.unitCost, 0) * 100) / 100
+    const total = Math.max(0, Math.min(subtotal, Number(finalValue.replace(',', '.')) || 0))
+    setSaving(true)
+    const saved = await onUpdate(quote, { ...form, items: quoteItems, cost_subtotal: costSubtotal, subtotal, valid_until: form.valid_until || null, discount: Math.max(0, subtotal - total), total })
+    setSaving(false)
+    if (saved) { setFinalValue(String(total)); setEditing(false) }
+  }
+  return <Modal title={quote.number} subtitle={quote.title} onClose={onClose} wide><div className="quote-detail">
+    <div className="detail-summary"><div><span className="detail-label">CLIENTE</span><b>{quote.contacts?.name || 'Cliente'}</b><small>{quote.contacts?.phone || quote.contacts?.email || 'Sem dados de contato'}</small></div><div><span className="detail-label">CRIADO EM</span><b>{datePt(quote.created_at)}</b><small>Validade {quote.valid_until ? datePt(quote.valid_until) : 'não definida'}</small></div><div><span className="detail-label">STATUS</span><StatusPill status={quote.status} /></div></div>
+    {editing ? <form className="quote-config-form" onSubmit={submit}>
+      <h3>Configurar orçamento</h3>
+      <label>Nome do projeto<input value={form.title} onChange={event => setField('title', event.target.value)} /></label>
+      <label>Status<select value={form.status} onChange={event => setField('status', event.target.value as Quote['status'])}><option value="pending">Pendente</option><option value="approved">Aprovado</option><option value="rejected">Recusado</option></select></label>
+      <fieldset className="quote-config-items"><legend>Itens e quantidades</legend>{quoteItems.map((item, index) => <div className="quote-config-item" key={`${quote.id}-${index}`}><label>Item<input value={item.description} onChange={event => setQuoteItems(current => current.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, description: event.target.value } : currentItem))} /></label><div className="quote-config-item-fields"><label>Quantidade<input type="number" min="0.01" step="0.01" value={item.quantity} onChange={event => setQuoteItems(current => current.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, quantity: Math.max(0.01, Number(event.target.value) || 0) } : currentItem))} /></label><label>Valor unitário<input type="number" min="0" step="0.01" value={item.unitPrice} onChange={event => setQuoteItems(current => current.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, unitPrice: Math.max(0, Number(event.target.value) || 0) } : currentItem))} /></label></div></div>)}</fieldset>
+      <div className="quote-config-grid"><label>Validade<input type="date" value={form.valid_until} onChange={event => setField('valid_until', event.target.value)} /></label><label>Prazo de entrega<input value={form.delivery_estimate} onChange={event => setField('delivery_estimate', event.target.value)} placeholder="Ex.: 30 dias úteis" /></label></div>
+      <label>Valor final<input type="number" min="0" max={editedSubtotal} step="0.01" value={finalValue} onChange={event => setFinalValue(event.target.value)} /><small>Preço sugerido atualizado: {brl(editedSubtotal)}. O valor final pode ser menor para aplicar desconto.</small></label>
+      <label>Pagamento<input value={form.payment_terms} onChange={event => setField('payment_terms', event.target.value)} /></label>
+      <label>Observações<textarea value={form.notes} onChange={event => setField('notes', event.target.value)} rows={3} /></label>
+      <div className="quote-config-actions"><button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancelar</button><button className="primary-button" disabled={saving}>{saving ? 'Salvando…' : 'Salvar alterações'}</button></div>
+    </form> : <>
+      <div className="detail-items">{quote.items.map((item, index) => <div className="detail-item" key={`${item.description}-${index}`}><span><b>{item.description}</b><small>{item.quantity} {item.unit || 'un'} × {brl(item.unitPrice)}</small></span><strong>{brl(item.quantity * item.unitPrice)}</strong></div>)}</div><div className="detail-totals"><span>Preço sugerido <b>{brl(quote.subtotal)}</b></span>{quote.discount > 0 && <span>Desconto <b>− {brl(quote.discount)}</b></span>}<span className="grand-total">Valor final <b>{brl(quote.total)}</b></span></div>
+      {quote.delivery_estimate && <div className="detail-notes"><b>Prazo de entrega</b><p>{quote.delivery_estimate}</p></div>}
+      <QuoteAttachments attachments={quote.attachments ?? []} />{quote.notes && <div className="detail-notes"><b>Observações</b><p>{quote.notes}</p></div>}{quote.payment_terms && <div className="detail-notes"><b>Pagamento</b><p>{quote.payment_terms}</p></div>}{quote.signed_at && <div className="signed-note"><ShieldCheck size={16} /><span>Assinado digitalmente por <b>{quote.signed_by}</b> em {new Date(quote.signed_at).toLocaleString('pt-BR')}.</span></div>}
+      <div className="detail-actions"><div>{quote.status === 'pending' && <button className="approve-button" onClick={onShare}><LockKeyhole size={15} /> Compartilhar com código</button>}<button className="secondary-button quote-edit-button" onClick={() => setEditing(true)}><Pencil size={15} /> Configurar orçamento</button></div><button className="primary-button" onClick={() => onDownload(quote)}><ArrowDownToLine size={16} /> {quote.signed_at ? 'Baixar contrato assinado' : 'Baixar proposta PDF'}</button></div>
+    </>}
+  </div></Modal>
 }
 
 function QuoteAttachments({ attachments }: { attachments: Quote['attachments'] }) {
