@@ -1,5 +1,5 @@
 [functions.issue-quote-share]
-verify_jwt = false
+verify_jwt = true
 
 [functions.get-quote-share]
 verify_jwt = false
