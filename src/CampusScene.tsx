@@ -186,7 +186,7 @@ export default function CampusScene(props: Props) {
       const aspect = width / height
       walk.camera.aspect = aspect
       walk.camera.updateProjectionMatrix()
-      const half = Math.max(19, 28 / aspect)
+      const half = Math.max(21, 31 / aspect)
       Object.assign(camera, { left: -half * aspect, right: half * aspect, top: half, bottom: -half })
       camera.updateProjectionMatrix()
       renderer.setSize(width, height, false)

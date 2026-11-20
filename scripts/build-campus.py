@@ -185,10 +185,89 @@ for x,y in [(-19,-10),(-19,7),(-5,-14),(1,-14),(7,-13),(19,-13),(20,13),(-15,15)
         bpy.context.object.data.materials.append(leaves[i%3])
     strip(x+.65,y-.72,.21,.23,.23)
 
-for x in range(-31,34,8):
-    for y in (22,29):
-        h=rng.uniform(3,10)
-        box("Quadra urbana",x+rng.uniform(-1,1),y,h/2-.9,5.8,5,h,frame)
+# Street level detail keeps the nearby blocks in scale with the factory.
+brick = material("Tijolo urbano", (.22,.12,.078), .84)
+cladding = material("Alvenaria cinza", (.20,.23,.25), .82)
+window = material("Vidro da rua", (.06,.13,.19), .29, .26)
+lit_window = material("Janelas acesas", (.83,.55,.27), .48, emission=.65)
+red = material("Lanternas vermelhas", (.56,.022,.018), emission=.55)
+blue = material("Carro azul petróleo", (.045,.19,.23), .33, .45)
+silver = material("Carro prata", (.37,.42,.46), .34, .4)
+rubber = material("Pneus", (.023,.027,.029), .91)
+
+for y in (-25.8, -17.6, 18.5):
+    box("Calçada",0,y,-.76,85,1.25,.2,floor)
+    box("Meio-fio",0,y-.62,-.67,85,.12,.14,cream)
+    for x in range(-40,41,3):
+        strip(x,y,-.653,.035,1.1,frame)
+box("Calçada lateral",25.5,0,-.76,1.4,52,.2,floor)
+for y in range(-23,26,5):
+    strip(28.4,y,-.88,.10,2.2,cream)
+for x in range(11,16):
+    strip(x-.25,-22.3,-.88,.47,3.35,cream)
+box("Rampa da entrada",11.1,-17.5,-.58,5.1,2.7,.44,floor)
+
+def streetlight(x,y):
+    box("Poste",x,y,1.05,.085,.085,3.5,frame)
+    box("Braço do poste",x,y-.42,2.78,.085,.83,.06,frame)
+    box("Luminária",x,y-.84,2.71,.24,.46,.07,warm)
+
+for x in (-33,-22,-4,17,32):
+    streetlight(x,-25.8)
+for x in (-20,-6,8,23):
+    streetlight(x,18.7)
+
+for x, levels, facade in [(-31,2,brick),(-22,3,cladding),(-12,2,brick),(-2,3,cladding),(9,2,cladding),(19,3,brick),(31,2,cladding)]:
+    y=25+ .7 * (x%3)
+    w=7.5 if levels==2 else 8.4
+    h=levels*2.25
+    front=y-3.15
+    box("Edifício do bairro",x,y,h/2-.87,w,6.3,h,facade)
+    box("Platibanda",x,y,h-.83,w+.22,6.48,.24,roof)
+    box("Instalação na cobertura",x+1.3,y+1,h-.45,1.5,1.65,.62,steel)
+    for level in range(levels):
+        z=.41+level*2.25
+        box("Friso horizontal",x,front-.035,z+.98,w,.10,.11,frame)
+        for bay in (-2.6,-.87,.87,2.6):
+            box("Caixilho",x+bay,front-.09,z,1.17,.1,1.24,frame)
+            box("Janela",x+bay,front-.151,z,1.04,.018,1.08,
+                lit_window if rng.random() < .49 else window)
+            box("Montante urbano",x+bay,front-.176,z,.045,.028,1.11,frame)
+    box("Marquise da rua",x,front-.39,.95,3.6,.9,.16,steel)
+    strip(x,front-.74,.865,2.8,.063,warm)
+
+def parked_car(x,y,paint):
+    box("Carroceria",x,y,-.38,3.75,1.58,.53,paint)
+    box("Cabine envidraçada",x-.14,y,.025,1.95,1.41,.38,window)
+    box("Teto do carro",x-.15,y,.23,1.7,1.34,.07,paint)
+    for dx in (-1.09,1.09):
+        for dy in (-.79,.79):
+            bpy.ops.mesh.primitive_cylinder_add(vertices=12,radius=.30,depth=.18,
+                location=(x+dx,y+dy,-.56),rotation=(math.pi/2,0,0))
+            bpy.context.object.name = "Roda"
+            bpy.context.object.data.materials.append(rubber)
+    for dy in (-.52,.52):
+        box("Farol",x+1.88,y+dy,-.29,.045,.35,.12,pale)
+        box("Lanterna",x-1.88,y+dy,-.28,.045,.31,.13,red)
+
+for x,y,paint in [(-21,-24,blue),(-11,-24,silver),(24,-24,cream),(-12,20.5,cream),(15,20.5,blue)]:
+    parked_car(x,y,paint)
+for x in (-18.5,-16.3,-14.1,-11.9,-9.7):
+    strip(x,-14.75,.071,.044,3.05,cream)
+strip(-14.1,-13.22,.071,8.8,.055,cream)
+for x in (13.5,18.5):
+    strip(x-1.12,-10.0,.074,.055,3.65,line)
+    strip(x+1.12,-10.0,.074,.055,3.65,line)
+    strip(x,-11.81,.074,2.28,.055,line)
+for x,y in [(-28,-17.5),(-24,-25.9),(-12,-25.9),(3,-25.9),(22,-25.9),(34,-25.9),
+            (-26,18.6),(-16,18.6),(-2,18.6),(12,18.6),(33,18.6),(25.4,-11),(25.4,3),(25.4,15)]:
+    box("Jardineira da calçada",x,y,-.58,1.25,1.05,.19,grass)
+    box("Tronco urbano",x,y,.18,.12,.12,1.54,wood)
+    for i in range(5):
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2,radius=rng.uniform(.40,.73),
+            location=(x+rng.uniform(-.54,.54),y+rng.uniform(-.43,.43),1.35+rng.uniform(0,.57)))
+        bpy.context.object.name = "Folhagem da rua"
+        bpy.context.object.data.materials.append(leaves[i%3])
 
 # Bake transforms and batch the static architecture by material.
 meshes = [o for o in bpy.context.scene.objects if o.type=="MESH"]
