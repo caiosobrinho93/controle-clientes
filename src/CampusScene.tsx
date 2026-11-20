@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react'
-import { createWalk, walkDirection, type WalkDirection } from './campus-walk'
+import { createVisitor, createWalk, walkDirection, type WalkDirection } from './campus-walk'
 
 export const sectors = {
   production: { label: 'Produção', position: [-6, 7.5, -3] },
@@ -86,6 +86,7 @@ export default function CampusScene(props: Props) {
     container.prepend(canvas)
 
     const scene = new THREE.Scene()
+    scene.fog = new THREE.Fog('#142336', 83, 134)
     const walk = createWalk()
     scene.add(walk.avatar)
     const camera = new THREE.OrthographicCamera(-28, 28, 18, -18, .1, 195)
@@ -108,26 +109,45 @@ export default function CampusScene(props: Props) {
     controls.update()
     canvas.style.touchAction = 'pan-y'
 
-    const ambient = new THREE.HemisphereLight('#b1d1ff', '#65513a', 1.2)
-    const moon = new THREE.DirectionalLight('#a6caff', 2.05)
+    const ambient = new THREE.HemisphereLight('#b8c7d9', '#786048', 1.12)
+    const moon = new THREE.DirectionalLight('#b9d0ef', 1.2)
     moon.position.set(9, 28, 18)
     moon.castShadow = !compact
     moon.shadow.mapSize.set(1024, 1024)
     Object.assign(moon.shadow.camera, { left: -32, right: 32, top: 29, bottom: -29, far: 80 })
     moon.shadow.camera.updateProjectionMatrix()
     moon.shadow.normalBias = .05
-    const rim = new THREE.DirectionalLight('#588eff', 1.25)
+    const rim = new THREE.DirectionalLight('#83abd7', .74)
     rim.position.set(-18, 15, -20)
     scene.add(ambient, moon, rim)
     const interior = [
       [-11, 2.8, 8, 115], [5, 3.5, 8, 130], [14, 4, -7, 190],
       [-12, 3.7, -2, 200], [-2, 3.7, -2, 200], [16, 2.5, 4, 75],
     ].map(([x, y, z, power]) => {
-      const lamp = new THREE.PointLight('#ffbf71', power, 14, 2)
+      const lamp = new THREE.PointLight('#ffc383', power, 12, 2)
       lamp.position.set(x, y, z)
       scene.add(lamp)
       return { lamp, power }
     })
+    const pedestrians = [
+      { x: -3, z: 15.2, length: 13, width: .52, period: 52, color: '#d9a644' },
+      { x: -5, z: 2.35, length: 11, width: .55, period: 43, color: '#83b4b5' },
+      { x: 8, z: 14.9, length: 10, width: .48, period: 39, color: '#a0ac76' },
+    ].slice(0, compact ? 2 : 3).map(route => {
+      const visitor = createVisitor(route.color)
+      visitor.avatar.visible = true
+      scene.add(visitor.avatar)
+      return { ...route, ...visitor }
+    })
+    function animateCourtyard(elapsed: number, walking: boolean) {
+      pedestrians.forEach(({ avatar, stride, x, z, length, width, period }, index) => {
+        const phase = elapsed * Math.PI * 2 / period + 1.1 + index * 2.3
+        avatar.position.set(x + Math.cos(phase) * length, .075, z + Math.sin(phase) * width)
+        avatar.rotation.y = Math.atan2(Math.sin(phase) * length, -Math.cos(phase) * width)
+        stride(elapsed * 8 + index, walking ? Math.min(.6, Math.abs(Math.sin(phase)) * .85) : 0)
+      })
+    }
+    animateCourtyard(0, false)
 
     const ring = new THREE.Mesh(new THREE.RingGeometry(2.8, 2.87, 48),
       new THREE.MeshBasicMaterial({ color: '#a0e62d', transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false, depthTest: false }))
@@ -229,7 +249,12 @@ export default function CampusScene(props: Props) {
       if (moving) {
         elapsed += dt / 1000
         heads.forEach(({ mesh, x }, index) => { mesh.position.x = x + Math.sin(elapsed * .85 + index * 1.7) * 1.42 })
-        interior.forEach(({ lamp, power }, index) => { lamp.intensity = power * (1 + Math.sin(elapsed * .7 + index) * .045) })
+        interior.forEach(({ lamp, power }, index) => {
+          const cycle = (elapsed + index * 8) % 58
+          const dim = THREE.MathUtils.smoothstep(cycle, 24, 27) - THREE.MathUtils.smoothstep(cycle, 32, 35)
+          lamp.intensity = power * (1 - dim * .72)
+        })
+        animateCourtyard(elapsed, true)
         ring.material.opacity = .73 + .18 * Math.sin(elapsed * 2.3)
         ring.scale.setScalar(1 + .055 * Math.sin(elapsed * 2.3))
       }

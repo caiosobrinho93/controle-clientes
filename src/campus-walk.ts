@@ -38,11 +38,11 @@ function blocked(x: number, z: number, radius: number, camera = false) {
   return walls.some(intersects) || (!camera && furniture.some(intersects))
 }
 
-export function createWalk() {
+export function createVisitor(color = '#abc946') {
   const avatar = new THREE.Group()
   avatar.name = 'Visitante'
   avatar.visible = false
-  const suit = new THREE.MeshStandardMaterial({ color: '#abc946', roughness: .65 })
+  const suit = new THREE.MeshStandardMaterial({ color, roughness: .65 })
   const dark = new THREE.MeshStandardMaterial({ color: '#222e40', roughness: .75 })
   const helmet = new THREE.MeshStandardMaterial({ color: '#ffdd8e', roughness: .37 })
   const block = (width: number, height: number, depth: number, material: THREE.Material, x: number, y: number, z = 0) => {
@@ -62,6 +62,15 @@ export function createWalk() {
     block(.14, .46, .16, suit, -.31, 1.04),
     block(.14, .46, .16, suit, .31, 1.04),
   ]
+  return { avatar, stride: (phase: number, amplitude: number) => {
+    limbs.forEach((mesh, index) => {
+      mesh.rotation.x = Math.sin(phase + index * Math.PI) * amplitude * (index < 2 ? 1 : -1)
+    })
+  } }
+}
+
+export function createWalk() {
+  const { avatar, stride } = createVisitor()
   const keys = new Set<WalkDirection>()
   const target = new THREE.Vector3()
   const goal = new THREE.Vector3()
@@ -92,9 +101,7 @@ export function createWalk() {
     }
     const room = halls.find(({ x, z, width, depth }) =>
       Math.abs(position.x - x) < width / 2 && Math.abs(position.z - z) < depth / 2)
-    limbs.forEach((mesh, index) => {
-      mesh.rotation.x = animate && distance ? Math.sin(time / 86 + index * Math.PI) * .55 * (index < 2 ? 1 : -1) : 0
-    })
+    stride(time / 86, animate && distance ? .55 : 0)
     position.y = room ? .3 : .09
     // Keep the following camera on the player's side of glass and walls.
     let follow = 4.6

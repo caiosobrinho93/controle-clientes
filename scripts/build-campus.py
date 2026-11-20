@@ -25,11 +25,11 @@ def material(name, color, rough=.55, metal=0, emission=0, alpha=1):
     return mat
 
 
-steel = material("Aço azul", (.045,.09,.17), .36, .42)
-roof = material("Cobertura", (.05,.107,.19), .45, .3)
+steel = material("Aço azul", (.052,.076,.103), .43, .38)
+roof = material("Cobertura", (.07,.112,.16), .53, .37)
 frame = material("Alumínio grafite", (.023,.039,.063), .35, .38)
 glass = material("Vidro fumê", (.25,.47,.66), .19, .08, alpha=.23)
-warm = material("Luz âmbar", (1,.58,.21), emission=3)
+warm = material("Luz âmbar", (1,.49,.15), emission=2)
 pale = material("Luz de trabalho", (.72,.86,1), emission=2)
 wood = material("Carvalho", (.53,.29,.115), .63)
 cream = material("Superfície clara", (.68,.62,.49))
@@ -41,13 +41,15 @@ leaves = [material("Folhagem " + str(i), c, .88) for i,c in enumerate(
     [(.028,.078,.062),(.046,.13,.088),(.083,.174,.106)])]
 
 
-def textured(mat, color, grain):
-    size = 64
+def textured(mat, color, grain, seams=False):
+    size = 128
     image = bpy.data.images.new(mat.name + " albedo", width=size, height=size)
     pixels = []
     for y in range(size):
         for x in range(size):
-            tone = .83 + rng.random() * .24 + math.sin((x + math.sin(y/7)) * grain) * .09
+            tone = .91 + rng.random() * .11 + math.sin((x + math.sin(y/7)) * grain) * .035
+            if seams:
+                tone *= .69 if x % 8 == 0 else (1.11 if x % 8 == 1 else 1)
             pixels.extend([c * tone for c in color] + [1])
     image.pixels.foreach_set(pixels)
     image.pack()
@@ -57,8 +59,25 @@ def textured(mat, color, grain):
 
 
 textured(wood, (.68,.49,.3), 1.05)
-textured(floor, (.53,.56,.59), .5)
 textured(road, (.20,.24,.29), .2)
+textured(roof, (.26,.33,.41), .27, seams=True)
+textured(steel, (.24,.30,.37), .42, seams=True)
+floor_nodes = floor.node_tree.nodes
+floor_links = floor.node_tree.links
+floor_shader = floor_nodes.get("Principled BSDF")
+for channel in ("diff", "nor_gl"):
+    source = OUT.parent / "showroom" / "materials" / f"concrete_floor_worn_001_{channel}_1k.jpg"
+    node = floor_nodes.new("ShaderNodeTexImage")
+    node.image = bpy.data.images.load(str(source))
+    node.image.pack()
+    if channel == "diff":
+        floor_links.new(node.outputs["Color"], floor_shader.inputs["Base Color"])
+    else:
+        node.image.colorspace_settings.name = "Non-Color"
+        normal = floor_nodes.new("ShaderNodeNormalMap")
+        normal.inputs["Strength"].default_value = .55
+        floor_links.new(node.outputs["Color"], normal.inputs["Color"])
+        floor_links.new(normal.outputs["Normal"], floor_shader.inputs["Normal"])
 
 
 def box(name, x, y, z, w, d, h, mat):
@@ -101,8 +120,6 @@ def hall(name,x,y,w,d,h,side=False):
     strip(x,y-d/2-.12,h-.32,w,.08)
     for offset in (-.24,.24):
         strip(x,y+d*offset,h-.23,w*.83,.12,pale if name=="Produção" else warm)
-    for i in range(round(w/.48)):
-        box("Nervura da cobertura",x-w/2+.2+i*.48,y,h+.183,.025,d,.035,steel)
     strip(x,y,h+.19,w*.49,.24,pale)
 
 
