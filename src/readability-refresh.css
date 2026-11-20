@@ -513,9 +513,16 @@ table td { padding: 15px 17px; color: #3b453b; font-size: 15px; line-height: 1.5
 .attachment-file-copy small { color: var(--read-muted); font-size: 12px; }
 .attachment-remove { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; border: 0; border-radius: 9px; color: #895a50; background: transparent; cursor: pointer; }
 .attachment-remove:hover { background: #f7eeeb; }
-.project-wizard-modal { width: min(1120px, calc(100vw - 48px)); max-width: none; max-height: min(92dvh, 1000px); overflow-y: auto; overscroll-behavior: contain; }
-.project-wizard-modal .modal-header { position: sticky; top: 0; z-index: 5; border-bottom: 1px solid var(--read-line); background: #fff; }
-.project-wizard-modal .page-content { padding-top: 20px; }
+.project-wizard-modal { width: min(920px, calc(100vw - 64px)); max-width: none; max-height: min(82dvh, 860px); padding: 0; overflow-y: auto; overscroll-behavior: contain; }
+.project-wizard-modal .modal-header { position: sticky; top: 0; z-index: 5; min-height: 44px; height: 44px; display: flex; justify-content: flex-end; padding: 0 14px; border-bottom: 0; background: #fff; }
+.project-wizard-modal .modal-header > div { display: none; }
+.project-wizard-modal .modal-close { margin: 0; }
+.project-wizard-modal .page-content { padding: 0 26px 26px; }
+.project-wizard-modal .wizard-topline { min-height: 38px; margin-bottom: 16px; }
+.project-wizard-modal .wizard-heading { margin-bottom: 18px; }
+.project-wizard-modal .builder-main,
+.project-wizard-modal .project-conditions { padding: 20px; }
+.project-wizard-modal .project-list-heading { margin-top: 20px; }
 .project-wizard-modal-backdrop { animation: project-modal-backdrop-in 220ms ease-out both; }
 .project-wizard-modal { animation: project-modal-rise 260ms cubic-bezier(.2,.78,.28,1) both; }
 @keyframes project-modal-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
@@ -540,11 +547,15 @@ table td { padding: 15px 17px; color: #3b453b; font-size: 15px; line-height: 1.5
 .public-attachments li a > span { min-width: 0; flex: 1; display: grid; gap: 4px; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; }
 .public-attachments li a small { color: #7a8077; font-size: 12px; font-weight: 400; }
 @media (max-width: 760px) {
-  .project-wizard-modal { width: 100%; max-width: none; max-height: calc(100dvh - 10px); border-radius: 16px 16px 8px 8px; }
-  .project-wizard-modal .modal-header { padding: 16px 18px 12px; }
-  .project-wizard-modal .modal-header h2 { font-size: 20px; }
-  .project-wizard-modal .page-content { padding: 16px 14px 24px; }
-  .project-wizard-modal .wizard-topline { margin-bottom: 17px; }
+  .project-wizard-modal { width: 100%; max-width: none; max-height: 78dvh; border-radius: 16px 16px 8px 8px; }
+  .project-wizard-modal .modal-header { min-height: 42px; height: 42px; padding: 0 12px; }
+  .project-wizard-modal .page-content { padding: 0 14px 22px; }
+  .project-wizard-modal .wizard-topline { min-height: 38px; margin-bottom: 12px; }
+  .project-wizard-modal .wizard-heading { margin-bottom: 16px; }
+  .project-wizard-modal .wizard-heading h1 { font-size: 27px; }
+  .project-wizard-modal .wizard-heading p { font-size: 14px; }
+  .project-wizard-modal .builder-main,
+  .project-wizard-modal .project-conditions { padding: 16px 14px; }
   .project-attachments { margin-top: 18px; padding: 16px 13px; }
   .project-attachments .project-list-heading { align-items: flex-start; flex-direction: column; }
   .project-attachments .project-list-heading h2 { font-size: 18px; }
