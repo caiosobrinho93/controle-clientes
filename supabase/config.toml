@@ -1,0 +1,8 @@
+[functions.issue-quote-share]
+verify_jwt = false
+
+[functions.get-quote-share]
+verify_jwt = false
+
+[functions.sign-quote]
+verify_jwt = false
